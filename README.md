@@ -1,6 +1,6 @@
 ![Reckoning](https://github.com/rf-peixoto/reckoning/blob/master/img/logo.png)
 
-Reckoning is an mayhem offensive operations orchestrator. Think of it as your personal fixer for cyber ops - connecting tools, passing data, and keeping everything running while you sip synth-coffee. Hear me out: this project will execute commands on your computer. Do I need to tell you anything else about the precautions you need to take?
+Reckoning is an mayhem offensive operations orchestrator. Think of it as your personal fixer for cyber ops - connecting tools, passing data, and keeping everything running while you sip synth-coffee. But hear me out: this project will execute commands on your computer. Do I need to tell you anything else about the precautions you need to take?
 
 
 ### The Vibe:
