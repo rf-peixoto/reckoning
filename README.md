@@ -17,7 +17,7 @@ Reckoning is an mayhem offensive operations orchestrator. Think of it as your pe
 
 ### Build Your Ops:
 - **Sequential Execution**: Tools run in your specified order, no manual babysitting.
-- **Import/Export**: Share your settings with your circle of gentlemen.
+- **Import/Export**: Share your configs with your fellow gentlemen.
 - **Auto-Updates**: Keep your tools sharp with built-in update commands.
 
 ## tl;dr
