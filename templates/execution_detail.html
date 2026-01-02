@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Execution {{ execution.id }}</title>
+
+    <style>
+        body {
+            font-family: monospace;
+            background-color: #0d1117;
+            color: #c9d1d9;
+            margin: 0;
+            padding: 24px;
+        }
+
+        h1, h2, h3 {
+            font-weight: normal;
+            color: #58a6ff;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 22px;
+        }
+
+        h2 {
+            font-size: 18px;
+            margin-top: 30px;
+        }
+
+        h3 {
+            font-size: 15px;
+            color: #79c0ff;
+        }
+
+        .meta {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .meta p {
+            margin: 4px 0;
+            font-size: 13px;
+        }
+
+        .status {
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status.running {
+            color: #d29922;
+        }
+
+        .status.completed {
+            color: #3fb950;
+        }
+
+        .status.failed {
+            color: #f85149;
+        }
+
+        .tool-result {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 14px;
+            margin-bottom: 16px;
+        }
+
+        pre {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+
+        .error {
+            color: #f85149;
+            margin-bottom: 6px;
+        }
+
+        em {
+            color: #8b949e;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>Execution Details</h1>
+
+<div class="meta">
+    <p><strong>ID:</strong> {{ execution.id }}</p>
+    <p><strong>Workflow:</strong> {{ execution.workflow_name }}</p>
+    <p><strong>Target:</strong> {{ execution.target }}</p>
+    <p>
+        <strong>Status:</strong>
+        <span id="exec-status" class="status {{ execution.status }}">
+            {{ execution.status }}
+        </span>
+    </p>
+    <p><strong>Started:</strong> {{ execution.start_time }}</p>
+    <p><strong>Finished:</strong> {{ execution.end_time or "—" }}</p>
+</div>
+
+<h2>Tool Results</h2>
+
+<div id="tool-results">
+{% if execution.results %}
+    {% for tool_id, result in execution.results.items() %}
+        <div class="tool-result">
+            <h3>{{ tool_id }}</h3>
+
+            {% if result.error %}
+                <div class="error"><strong>Error</strong></div>
+                <pre>{{ result.error }}</pre>
+            {% endif %}
+
+            {% if result.output %}
+                <pre>{{ result.output }}</pre>
+            {% endif %}
+
+            {% if not result.output and not result.error %}
+                <em>No output produced.</em>
+            {% endif %}
+        </div>
+    {% endfor %}
+{% else %}
+    <em>No results available yet.</em>
+{% endif %}
+</div>
+
+<script>
+    const executionId = "{{ execution.id }}";
+
+    async function refreshStatus() {
+        try {
+            const resp = await fetch(`/api/execution/${executionId}/status`);
+            if (!resp.ok) return;
+
+            const data = await resp.json();
+
+            const statusEl = document.getElementById("exec-status");
+            statusEl.textContent = data.status;
+            statusEl.className = "status " + data.status;
+
+            const container = document.getElementById("tool-results");
+            container.innerHTML = "";
+
+            if (data.results && Object.keys(data.results).length > 0) {
+                for (const [tool, result] of Object.entries(data.results)) {
+                    const div = document.createElement("div");
+                    div.className = "tool-result";
+
+                    let html = `<h3>${tool}</h3>`;
+
+                    if (result.error) {
+                        html += `<div class="error"><strong>Error</strong></div><pre>${result.error}</pre>`;
+                    }
+
+                    if (result.output) {
+                        html += `<pre>${result.output}</pre>`;
+                    }
+
+                    if (!result.output && !result.error) {
+                        html += `<em>No output produced.</em>`;
+                    }
+
+                    div.innerHTML = html;
+                    container.appendChild(div);
+                }
+            } else {
+                container.innerHTML = "<em>No results available yet.</em>";
+            }
+
+            if (data.status === "completed" || data.status === "failed") {
+                clearInterval(pollInterval);
+            }
+
+        } catch (e) {
+            console.error("Polling failed:", e);
+        }
+    }
+
+    const pollInterval = setInterval(refreshStatus, 2000);
+</script>
+
+</body>
+</html>
