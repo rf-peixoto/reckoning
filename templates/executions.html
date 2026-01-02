@@ -1,0 +1,185 @@
+<!-- templates/executions.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 style="color: var(--accent);">
+        <i class="fas fa-history"></i> Execution History
+    </h2>
+    <div class="d-flex gap-10">
+        <button onclick="clearAllExecutions()" class="btn btn-danger">
+            <i class="fas fa-trash"></i> Clear All
+        </button>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-chart-bar"></i> Execution Statistics
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20" style="flex-wrap: wrap;">
+            <div class="stat-card" style="flex: 1; min-width: 150px; text-align: center;">
+                <div style="font-size: 32px; color: var(--accent); font-weight: bold;">
+                    {{ executions|length }}
+                </div>
+                <div style="color: var(--text-muted);">Total Executions</div>
+            </div>
+            <div class="stat-card" style="flex: 1; min-width: 150px; text-align: center;">
+                <div style="font-size: 32px; color: var(--success); font-weight: bold;">
+                    {{ executions|selectattr('status', 'equalto', 'completed')|list|length }}
+                </div>
+                <div style="color: var(--text-muted);">Completed</div>
+            </div>
+            <div class="stat-card" style="flex: 1; min-width: 150px; text-align: center;">
+                <div style="font-size: 32px; color: var(--danger); font-weight: bold;">
+                    {{ executions|selectattr('status', 'equalto', 'failed')|list|length }}
+                </div>
+                <div style="color: var(--text-muted);">Failed</div>
+            </div>
+            <div class="stat-card" style="flex: 1; min-width: 150px; text-align: center;">
+                <div style="font-size: 32px; color: var(--info); font-weight: bold;">
+                    {{ executions|selectattr('status', 'equalto', 'running')|list|length }}
+                </div>
+                <div style="color: var(--text-muted);">Running</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-list"></i> All Executions
+        </div>
+    </div>
+    <div class="card-body">
+        {% if executions %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Execution ID</th>
+                        <th>Workflow</th>
+                        <th>Target</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for exec in executions %}
+                    <tr>
+                        <td>
+                            <code style="font-size: 11px;">{{ exec.execution_id[:8] }}...</code>
+                        </td>
+                        <td>{{ exec.workflow_name }}</td>
+                        <td>
+                            <span style="font-family: monospace;">{{ exec.domain }}</span>
+                        </td>
+                        <td>
+                            <span class="status-badge status-{{ exec.status }}">
+                                {{ exec.status }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if exec.started_at %}
+                                {{ exec.started_at[:19].replace('T', ' ') }}
+                            {% else %}
+                                --
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if exec.started_at and exec.completed_at %}
+                                {% set start = exec.started_at %}
+                                {% set end = exec.completed_at %}
+                                {% set diff = (end|string|length > 0 and start|string|length > 0) %}
+                                {% if diff %}
+                                    {{ ((end|string)[:19]|length - (start|string)[:19]|length)|abs }}s
+                                {% else %}
+                                    --
+                                {% endif %}
+                            {% else %}
+                                --
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="d-flex gap-10">
+                                <a href="{{ url_for('execution_status', execution_id=exec.execution_id) }}" 
+                                   class="btn btn-primary btn-sm">
+                                    <i class="fas fa-eye"></i> View
+                                </a>
+                                <a href="{{ url_for('export_execution', execution_id=exec.execution_id) }}" 
+                                   class="btn btn-success btn-sm">
+                                    <i class="fas fa-download"></i> Export
+                                </a>
+                                <form action="{{ url_for('delete_execution', execution_id=exec.execution_id) }}" 
+                                      method="POST" style="display: inline;">
+                                    <button type="submit" class="btn btn-danger btn-sm">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center" style="padding: 40px;">
+            <i class="fas fa-inbox" style="font-size: 48px; color: var(--text-muted); margin-bottom: 20px;"></i>
+            <h3 style="color: var(--text-muted);">No executions yet</h3>
+            <p style="color: var(--text-muted);">Run a workflow to see execution history here</p>
+            <a href="{{ url_for('index') }}" class="btn btn-primary mt-20">
+                <i class="fas fa-play"></i> Run Workflow
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function clearAllExecutions() {
+        if (confirm('Are you sure you want to delete ALL execution history? This action cannot be undone.')) {
+            fetch('/execution/clear_all', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ confirm: true })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            });
+        }
+    }
+    
+    // Auto-refresh page every 30 seconds if there are running executions
+    document.addEventListener('DOMContentLoaded', function() {
+        const hasRunning = {{ 'true' if executions|selectattr('status', 'equalto', 'running')|list|length > 0 else 'false' }};
+        if (hasRunning) {
+            setTimeout(() => {
+                window.location.reload();
+            }, 30000); // 30 seconds
+        }
+    });
+</script>
+{% endblock %}

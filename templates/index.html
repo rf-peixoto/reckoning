@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 style="color: var(--accent);">Workflow Dashboard</h2>
+    <a href="{{ url_for('create_workflow') }}" class="btn btn-primary">
+        <i class="fas fa-plus"></i> New Workflow
+    </a>
+</div>
+
+<div class="alert alert-info">
+    <i class="fas fa-info-circle"></i>
+    Create, manage, and execute modular red team workflows.
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-project-diagram"></i> Available Workflows
+        </div>
+    </div>
+    <div class="card-body">
+        {% if workflows %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th>Tools</th>
+                        <th>Last Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for workflow in workflows %}
+                    <tr>
+                        <td>
+                            <strong>{{ workflow.name }}</strong>
+                            {% if workflow.id == 'sample-workflow' %}
+                            <span class="status-badge status-pending" style="margin-left: 10px;">Sample</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ workflow.description }}</td>
+                        <td>{{ workflow.tools|length }} tools</td>
+                        <td>{{ workflow.updated_at[:10] }}</td>
+                        <td>
+                            <div class="d-flex gap-10">
+                                <a href="{{ url_for('create_workflow', id=workflow.id) }}" 
+                                   class="btn btn-secondary btn-sm">
+                                    <i class="fas fa-edit"></i> Edit
+                                </a>
+                                <button onclick="runWorkflow('{{ workflow.id }}', '{{ workflow.name }}')" 
+                                        class="btn btn-primary btn-sm">
+                                    <i class="fas fa-play"></i> Run
+                                </button>
+                                <a href="{{ url_for('export_workflow', workflow_id=workflow.id) }}" 
+                                   class="btn btn-success btn-sm">
+                                    <i class="fas fa-download"></i> Export
+                                </a>
+                                <form action="{{ url_for('delete_workflow', workflow_id=workflow.id) }}" 
+                                      method="POST" style="display: inline;">
+                                    <button type="submit" class="btn btn-danger btn-sm">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center" style="padding: 40px;">
+            <i class="fas fa-inbox" style="font-size: 48px; color: var(--text-muted); margin-bottom: 20px;"></i>
+            <h3 style="color: var(--text-muted);">No workflows yet</h3>
+            <p style="color: var(--text-muted);">Create your first workflow to get started</p>
+            <a href="{{ url_for('create_workflow') }}" class="btn btn-primary mt-20">
+                <i class="fas fa-plus"></i> Create Workflow
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Run Workflow Modal -->
+<div id="runModal" class="modal">
+    <div class="modal-content">
+        <div class="d-flex justify-between align-center mb-20">
+            <h3 id="runModalTitle" style="color: var(--accent);">Run Workflow</h3>
+            <button onclick="closeRunModal()" style="background: none; border: none; color: var(--text); font-size: 20px; cursor: pointer;">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="runModalBody">
+            <div class="form-group">
+                <label class="form-label">Target Domain</label>
+                <input type="text" id="targetDomain" class="form-control" placeholder="example.com">
+                <div class="form-text">
+                    Enter the target domain to start the workflow
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Additional Notes</label>
+                <textarea id="executionNotes" class="form-control" rows="3" placeholder="Optional notes about this execution..."></textarea>
+            </div>
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>Warning:</strong> Do not run this tool on shared servers.
+            </div>
+            <div class="d-flex justify-end gap-10 mt-20">
+                <button onclick="closeRunModal()" class="btn btn-secondary">Cancel</button>
+                <button onclick="startExecution()" class="btn btn-primary">
+                    <i class="fas fa-play"></i> Start Execution
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-sync-alt"></i> Quick Updates
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20" style="flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 200px;">
+                <h4 style="color: var(--accent); margin-bottom: 10px;">
+                    <i class="fas fa-tools"></i> Tool Maintenance
+                </h4>
+                <p style="color: var(--text-muted); margin-bottom: 15px;">
+                    Keep your security tools updated with the latest signatures and templates.
+                </p>
+                <a href="{{ url_for('tools_update') }}" class="btn btn-primary">
+                    <i class="fas fa-sync"></i> Manage Tool Updates
+                </a>
+            </div>
+            <div style="flex: 1; min-width: 200px;">
+                <h4 style="color: var(--accent); margin-bottom: 10px;">
+                    <i class="fas fa-lightbulb"></i> Examples Update Commands
+                </h4>
+                <ul style="color: var(--text-muted); font-size: 12px; padding-left: 20px;">
+                    <li><code>nuclei -update</code></li>
+                    <li><code>subfinder -up</code></li>
+                    <li><code>naabu -up</code></li>
+                    <li><code>apt-get update && apt-get upgrade</code></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-history"></i> Recent Executions
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="text-center text-muted">
+            <p>Execution history will appear here</p>
+            <a href="{{ url_for('executions_list') }}" class="btn btn-secondary mt-10">
+                <i class="fas fa-history"></i> View All Executions
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-lightbulb"></i> Quick Start
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20" style="flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 300px;">
+                <h4 style="color: var(--accent); margin-bottom: 15px;">
+                    <i class="fas fa-cogs"></i> How It Works
+                </h4>
+                <ol style="padding-left: 20px; color: var(--text-muted);">
+                    <li>Create a workflow with sequential tools</li>
+                    <li>Configure tool arguments with placeholders like {0}, {1}, etc.</li>
+                    <li>{0} = Initial domain/input</li>
+                    <li>{1} = Output from first tool</li>
+                    <li>{2} = Output from second tool, etc.</li>
+                    <li>Execute and monitor real-time progress</li>
+                </ol>
+            </div>
+            <div style="flex: 1; min-width: 300px;">
+                <h4 style="color: var(--accent); margin-bottom: 15px;">
+                    <i class="fas fa-shield-alt"></i> Security Notes
+                </h4>
+                <ul style="padding-left: 20px; color: var(--text-muted);">
+                    <li>Only run against authorized targets</li>
+                    <li>Tool outputs may contain sensitive data</li>
+                    <li>Use in isolated lab environments</li>
+                    <li>Review and sanitize outputs before sharing</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentWorkflowId = null;
+    let currentWorkflowName = null;
+    
+    function runWorkflow(workflowId, workflowName) {
+        currentWorkflowId = workflowId;
+        currentWorkflowName = workflowName;
+        
+        document.getElementById('runModalTitle').textContent = `Run Workflow: ${workflowName}`;
+        document.getElementById('targetDomain').value = '';
+        document.getElementById('executionNotes').value = '';
+        document.getElementById('runModal').style.display = 'block';
+    }
+    
+    function closeRunModal() {
+        document.getElementById('runModal').style.display = 'none';
+        currentWorkflowId = null;
+        currentWorkflowName = null;
+    }
+    
+    function startExecution() {
+        const domain = document.getElementById('targetDomain').value.trim();
+        
+        if (!domain) {
+            alert('Please enter a target domain');
+            return;
+        }
+        
+        // Validate domain format (basic check)
+        if (!domain.match(/^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$/)) {
+            if (!confirm(`Domain "${domain}" doesn't look like a standard domain. Continue anyway?`)) {
+                return;
+            }
+        }
+        
+        // Show loading
+        document.getElementById('runModalBody').innerHTML = `
+            <div class="text-center">
+                <i class="fas fa-spinner fa-spin" style="font-size: 40px; color: var(--accent); margin-bottom: 20px;"></i>
+                <p>Starting execution for ${domain}...</p>
+            </div>
+        `;
+        
+        // Start the execution
+        fetch('/execute', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                workflow_id: currentWorkflowId,
+                domain: domain
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Redirect to execution status page
+                window.location.href = data.redirect;
+            } else {
+                alert(`Error: ${data.error}`);
+                closeRunModal();
+            }
+        })
+        .catch(error => {
+            alert(`Error: ${error}`);
+            closeRunModal();
+        });
+    }
+    
+    // Close modal when clicking outside
+    document.getElementById('runModal').addEventListener('click', function(e) {
+        if (e.target.id === 'runModal') {
+            closeRunModal();
+        }
+    });
+    
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeRunModal();
+        }
+    });
+</script>
+{% endblock %}

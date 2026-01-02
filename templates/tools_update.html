@@ -1,0 +1,450 @@
+<!-- templates/tools_update.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 style="color: var(--accent);">
+        <i class="fas fa-sync-alt"></i> Tool Updates Management
+    </h2>
+    <div class="d-flex gap-10">
+        <button onclick="updateAllTools()" class="btn btn-primary">
+            <i class="fas fa-sync"></i> Update All Tools
+        </button>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-info-circle"></i> About Tool Updates
+        </div>
+    </div>
+    <div class="card-body">
+        <p style="color: var(--text-muted); margin-bottom: 15px;">
+            This section allows you to keep your security tools up-to-date. Each tool can have an 
+            <strong>update command</strong> configured (e.g., <code>nuclei -update</code> or <code>apt-get update && apt-get upgrade -y</code>).
+        </p>
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle"></i>
+            <strong>Warning:</strong> Running update commands may modify system packages. Only update tools you trust.
+        </div>
+    </div>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header d-flex justify-between align-center">
+        <div class="card-title">
+            <i class="fas fa-tools"></i> Available Tools
+        </div>
+        <div>
+            <input type="text" id="toolSearch" class="form-control" placeholder="Search tools..." 
+                   style="width: 200px;" onkeyup="searchTools()">
+        </div>
+    </div>
+    <div class="card-body">
+        {% if tools %}
+        <div class="table-responsive">
+            <table class="table" id="toolsTable">
+                <thead>
+                    <tr>
+                        <th>Tool Name</th>
+                        <th>Command</th>
+                        <th>Update Command</th>
+                        <th>Last Updated</th>
+                        <th>Workflow</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tool in tools %}
+                    <tr data-tool-id="{{ tool.id }}" data-workflow-id="{{ tool.workflow_id }}">
+                        <td>
+                            <div class="d-flex align-center gap-10">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background: {{ tool.color }};"></div>
+                                <strong>{{ tool.name }}</strong>
+                            </div>
+                        </td>
+                        <td>
+                            <code style="font-size: 12px;">{{ tool.command }}</code>
+                        </td>
+                        <td>
+                            {% if tool.update_command %}
+                                <code style="font-size: 12px;">{{ tool.update_command }}</code>
+                            {% else %}
+                                <span class="text-muted">Not configured</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if tool.last_updated %}
+                                {{ tool.last_updated[:16].replace('T', ' ') }}
+                            {% else %}
+                                <span class="text-muted">Never</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ tool.workflow_name }}
+                        </td>
+                        <td>
+                            <span class="status-badge status-pending" id="status-{{ tool.id }}">
+                                Ready
+                            </span>
+                        </td>
+                        <td>
+                            <div class="d-flex gap-10">
+                                {% if tool.update_command %}
+                                <button onclick="updateTool('{{ tool.id }}', '{{ tool.workflow_id }}', '{{ tool.name }}')" 
+                                        class="btn btn-primary btn-sm">
+                                    <i class="fas fa-sync"></i> Update
+                                </button>
+                                {% endif %}
+                                <a href="{{ url_for('create_workflow', id=tool.workflow_id) }}" 
+                                   class="btn btn-secondary btn-sm">
+                                    <i class="fas fa-edit"></i> Edit
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center" style="padding: 40px;">
+            <i class="fas fa-tools" style="font-size: 48px; color: var(--text-muted); margin-bottom: 20px;"></i>
+            <h3 style="color: var(--text-muted);">No tools found</h3>
+            <p style="color: var(--text-muted);">Create a workflow with tools first</p>
+            <a href="{{ url_for('create_workflow') }}" class="btn btn-primary mt-20">
+                <i class="fas fa-plus"></i> Create Workflow
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-history"></i> Recent Update History
+        </div>
+    </div>
+    <div class="card-body">
+        {% if recent_updates %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Output</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for update in recent_updates|reverse %}
+                    <tr>
+                        <td>{{ update.tool_name }}</td>
+                        <td>
+                            <span class="status-badge status-{{ update.status }}">
+                                {{ update.status }}
+                            </span>
+                        </td>
+                        <td>
+                            {{ update.start_time[:19].replace('T', ' ') if update.start_time else '--' }}
+                        </td>
+                        <td>
+                            {% if update.start_time and update.end_time %}
+                                {% set start = update.start_time %}
+                                {% set end = update.end_time %}
+                                {{ ((end|string)[:19]|length - (start|string)[:19]|length)|abs }}s
+                            {% else %}
+                                --
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button onclick="showUpdateOutput('{{ update.update_id }}')" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center" style="padding: 20px; color: var(--text-muted);">
+            <i class="fas fa-history"></i> No update history yet
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Update Progress Modal -->
+<div id="updateModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000;">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--secondary); border-radius: 8px; padding: 20px; width: 80%; max-width: 600px; max-height: 80%; overflow-y: auto;">
+        <div class="d-flex justify-between align-center mb-20">
+            <h3 id="modalTitle" style="color: var(--accent);">Tool Update</h3>
+            <button onclick="closeModal()" style="background: none; border: none; color: var(--text); font-size: 20px; cursor: pointer;">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="modalContent">
+            <div id="updateProgress">
+                <div class="text-center">
+                    <i class="fas fa-sync fa-spin" style="font-size: 40px; color: var(--accent); margin-bottom: 20px;"></i>
+                    <p id="progressMessage">Starting update...</p>
+                </div>
+                <div class="progress-bar mt-20">
+                    <div id="progressBar" class="progress-fill" style="width: 0%;"></div>
+                </div>
+                <div id="updateOutput" class="code-block mt-20" style="display: none;">
+                    <pre id="outputContent"></pre>
+                </div>
+                <div id="updateError" class="alert alert-danger mt-20" style="display: none;"></div>
+            </div>
+        </div>
+        <div class="d-flex justify-end mt-20">
+            <button onclick="closeModal()" class="btn btn-secondary" id="closeButton" style="display: none;">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let activeUpdateId = null;
+    let updateCheckInterval = null;
+    
+    function searchTools() {
+        const input = document.getElementById('toolSearch');
+        const filter = input.value.toLowerCase();
+        const table = document.getElementById('toolsTable');
+        const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+        
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const text = row.textContent.toLowerCase();
+            if (text.includes(filter)) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        }
+    }
+    
+    function updateTool(toolId, workflowId, toolName) {
+        if (!confirm(`Update ${toolName}? This may take a few minutes.`)) {
+            return;
+        }
+        
+        openModal(`Updating ${toolName}...`);
+        
+        fetch('/api/tool/update', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                tool_id: toolId,
+                workflow_id: workflowId
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Update status in table
+                const statusBadge = document.getElementById(`status-${toolId}`);
+                if (statusBadge) {
+                    statusBadge.className = 'status-badge status-running';
+                    statusBadge.textContent = 'Updating...';
+                }
+                
+                // Start polling for update status
+                startPollingUpdate(toolId, toolName);
+            } else {
+                showError(`Failed to start update: ${data.error}`);
+            }
+        })
+        .catch(error => {
+            showError(`Error: ${error}`);
+        });
+    }
+    
+    function updateAllTools() {
+        if (!confirm('Update ALL tools with update commands? This may take several minutes.')) {
+            return;
+        }
+        
+        openModal('Updating all tools...');
+        
+        fetch('/api/tools/update-all', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('progressMessage').textContent = 
+                    `Started updates for ${data.update_count} tools...`;
+                
+                // Start polling for all updates
+                startPollingAllUpdates(data.update_ids);
+            } else {
+                showError(`Failed to start updates: ${data.error}`);
+            }
+        })
+        .catch(error => {
+            showError(`Error: ${error}`);
+        });
+    }
+    
+    function startPollingUpdate(toolId, toolName) {
+        // We'll use a simple approach - poll for recent updates
+        // In a real app, you'd use WebSockets or Server-Sent Events
+        let checks = 0;
+        const maxChecks = 60; // 5 minutes max
+        
+        updateCheckInterval = setInterval(() => {
+            fetch('/api/updates/recent')
+                .then(response => response.json())
+                .then(updates => {
+                    // Find the most recent update for this tool
+                    const recentUpdate = updates.find(u => u.tool_id === toolId);
+                    
+                    if (recentUpdate) {
+                        if (recentUpdate.status === 'completed') {
+                            clearInterval(updateCheckInterval);
+                            showSuccess(`${toolName} updated successfully!`);
+                            
+                            // Update status in table
+                            const statusBadge = document.getElementById(`status-${toolId}`);
+                            if (statusBadge) {
+                                statusBadge.className = 'status-badge status-completed';
+                                statusBadge.textContent = 'Updated';
+                            }
+                            
+                            // Reload page after 2 seconds to show new timestamps
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 2000);
+                            
+                        } else if (recentUpdate.status === 'failed') {
+                            clearInterval(updateCheckInterval);
+                            showError(`${toolName} update failed: ${recentUpdate.error}`);
+                            
+                            const statusBadge = document.getElementById(`status-${toolId}`);
+                            if (statusBadge) {
+                                statusBadge.className = 'status-badge status-failed';
+                                statusBadge.textContent = 'Failed';
+                            }
+                        }
+                        
+                        // Show output if available
+                        if (recentUpdate.output) {
+                            document.getElementById('outputContent').textContent = recentUpdate.output;
+                            document.getElementById('updateOutput').style.display = 'block';
+                        }
+                    }
+                    
+                    checks++;
+                    if (checks >= maxChecks) {
+                        clearInterval(updateCheckInterval);
+                        showError('Update timed out');
+                    }
+                });
+        }, 2000); // Check every 2 seconds
+    }
+    
+    function startPollingAllUpdates(updateIds) {
+        // Similar logic for multiple updates
+        // This is simplified - in reality you'd track each update individually
+        document.getElementById('progressMessage').textContent = 
+            `Updates in progress... This may take several minutes.`;
+    }
+    
+    function showUpdateOutput(updateId) {
+        fetch(`/api/update/status/${updateId}`)
+            .then(response => response.json())
+            .then(update => {
+                openModal(`Update Output: ${update.tool_name}`);
+                
+                const outputDiv = document.getElementById('updateOutput');
+                const errorDiv = document.getElementById('updateError');
+                
+                if (update.output) {
+                    document.getElementById('outputContent').textContent = update.output;
+                    outputDiv.style.display = 'block';
+                } else {
+                    outputDiv.style.display = 'none';
+                }
+                
+                if (update.error) {
+                    document.getElementById('updateError').textContent = `Error: ${update.error}`;
+                    errorDiv.style.display = 'block';
+                } else {
+                    errorDiv.style.display = 'none';
+                }
+                
+                document.getElementById('closeButton').style.display = 'block';
+                document.getElementById('progressBar').style.display = 'none';
+            })
+            .catch(error => {
+                showError(`Failed to load update details: ${error}`);
+            });
+    }
+    
+    function openModal(title) {
+        document.getElementById('modalTitle').textContent = title;
+        document.getElementById('updateModal').style.display = 'block';
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('updateOutput').style.display = 'none';
+        document.getElementById('updateError').style.display = 'none';
+        document.getElementById('closeButton').style.display = 'none';
+        document.getElementById('progressBar').style.display = 'block';
+    }
+    
+    function closeModal() {
+        document.getElementById('updateModal').style.display = 'none';
+        if (updateCheckInterval) {
+            clearInterval(updateCheckInterval);
+        }
+    }
+    
+    function showSuccess(message) {
+        document.getElementById('progressMessage').textContent = message;
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressBar').style.background = 'var(--success)';
+        document.getElementById('closeButton').style.display = 'block';
+    }
+    
+    function showError(message) {
+        document.getElementById('progressMessage').textContent = 'Update failed';
+        document.getElementById('updateError').textContent = message;
+        document.getElementById('updateError').style.display = 'block';
+        document.getElementById('closeButton').style.display = 'block';
+    }
+    
+    // Close modal when clicking outside
+    document.getElementById('updateModal').addEventListener('click', function(e) {
+        if (e.target.id === 'updateModal') {
+            closeModal();
+        }
+    });
+    
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+        }
+    });
+</script>
+{% endblock %}

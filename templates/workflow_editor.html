@@ -1,0 +1,462 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 style="color: var(--accent);">
+        {% if workflow %}Edit{% else %}Create New{% endif %} Workflow
+    </h2>
+    <div class="d-flex gap-10">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Back
+        </a>
+        <button onclick="saveWorkflow()" class="btn btn-primary">
+            <i class="fas fa-save"></i> Save Workflow
+        </button>
+    </div>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-info-circle"></i> Workflow Configuration
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="form-group">
+            <label class="form-label">Workflow Name</label>
+            <input type="text" id="workflowName" class="form-control" 
+                   value="{{ workflow.name if workflow else 'My Recon Workflow' }}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea id="workflowDescription" class="form-control" rows="3">{{ workflow.description if workflow else 'Enter workflow description here' }}</textarea>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-between align-center">
+        <div class="card-title">
+            <i class="fas fa-tools"></i> Tool Chain Configuration
+        </div>
+        <button onclick="addTool()" class="btn btn-success btn-sm">
+            <i class="fas fa-plus"></i> Add Tool
+        </button>
+    </div>
+    <div class="card-body">
+        <div id="toolChain" class="tool-chain">
+            {% if workflow and workflow.tools %}
+                {% for tool in workflow.tools %}
+                <div class="tool-node" data-tool-id="{{ tool.id }}">
+                    <div class="tool-icon" style="background: {{ tool.color }};">
+                        <i class="fas fa-{{ 'terminal' if not loop.index0 else 'search' if loop.index0 == 1 else 'filter' if loop.index0 == 2 else 'folder' }}"></i>
+                    </div>
+                    <div class="tool-content">
+                        <div class="card" style="margin-bottom: 0;">
+                            <div class="card-header d-flex justify-between align-center">
+                                <input type="text" class="form-control" style="width: auto; background: transparent; border: none; color: white; font-weight: bold; font-size: 16px;" 
+                                       value="{{ tool.name }}" onchange="updateToolName(this, '{{ tool.id }}')">
+                                <div class="d-flex gap-10">
+                                    <select class="form-control" style="width: auto; padding: 5px 10px;" 
+                                            onchange="updateToolColor(this, '{{ tool.id }}')">
+                                        <option value="#4a86e8" {% if tool.color == '#4a86e8' %}selected{% endif %}>Blue</option>
+                                        <option value="#5cb85c" {% if tool.color == '#5cb85c' %}selected{% endif %}>Green</option>
+                                        <option value="#f0ad4e" {% if tool.color == '#f0ad4e' %}selected{% endif %}>Orange</option>
+                                        <option value="#d9534f" {% if tool.color == '#d9534f' %}selected{% endif %}>Red</option>
+                                        <option value="#5bc0de" {% if tool.color == '#5bc0de' %}selected{% endif %}>Cyan</option>
+                                    </select>
+                                    <div class="form-check" style="display: flex; align-items: center;">
+                                        <input type="checkbox" class="form-check-input" id="enabled{{ tool.id }}" 
+                                               {% if tool.enabled %}checked{% endif %} 
+                                               onchange="updateToolEnabled(this, '{{ tool.id }}')">
+                                        <label class="form-check-label" for="enabled{{ tool.id }}" style="margin-left: 5px;">Enabled</label>
+                                    </div>
+                                    <button onclick="removeTool('{{ tool.id }}')" class="btn btn-danger btn-sm">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex gap-20" style="flex-wrap: wrap;">
+                                    <div style="flex: 1; min-width: 250px;">
+                                        <div class="form-group">
+                                            <label class="form-label">Command/Path</label>
+                                            <input type="text" class="form-control tool-command" 
+                                                   value="{{ tool.command }}" 
+                                                   placeholder="e.g., assetfinder, /usr/bin/nuclei">
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Arguments Template</label>
+                                            <input type="text" class="form-control tool-args" 
+                                                   value="{{ tool.args_template }}" 
+                                                   placeholder="e.g., {0}, -l {1}, --input {2}">
+                                            <div class="form-text">
+                                                Use {0} for initial input, {1} for tool 1 output, etc.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Update Command</label>
+                                            <input type="text" class="form-control tool-update-command" 
+                                                   value="{{ tool.update_command if tool.update_command else '' }}" 
+                                                   placeholder="e.g., -update, --update-templates">
+                                            <div class="form-text">
+                                                Command arguments to update this tool
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="flex: 1; min-width: 250px;">
+                                        <div class="form-group">
+                                            <label class="form-label">Input Source</label>
+                                            <select class="form-control tool-input-source">
+                                                <option value="initial" {% if tool.input_source == 'initial' %}selected{% endif %}>Initial Input ({0})</option>
+                                                <option value="previous" {% if tool.input_source == 'previous' %}selected{% endif %}>Previous Tool Output</option>
+                                                <option value="specific" {% if tool.input_source == 'specific' %}selected{% endif %}>Specific Tool Output</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group tool-specific-step" {% if tool.input_source != 'specific' %}style="display: none;"{% endif %}>
+                                            <label class="form-label">Use Output from Tool #</label>
+                                            <input type="number" class="form-control" 
+                                                   value="{{ tool.specific_step if tool.specific_step else 1 }}" 
+                                                   min="1" max="10">
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Description</label>
+                                            <textarea class="form-control tool-description" rows="2">{{ tool.description }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Last Updated</label>
+                                            <input type="text" class="form-control" 
+                                                   value="{{ tool.last_updated if tool.last_updated else 'Never updated' }}" 
+                                                   readonly style="background: var(--primary);">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% if not loop.last %}
+                    <div class="tool-connector"></div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+            <div id="no-tools" class="text-center" style="padding: 40px;">
+                <i class="fas fa-tools" style="font-size: 48px; color: var(--text-muted); margin-bottom: 20px;"></i>
+                <h3 style="color: var(--text-muted);">No tools configured</h3>
+                <p style="color: var(--text-muted);">Add tools to build your workflow</p>
+                <button onclick="addTool()" class="btn btn-primary mt-20">
+                    <i class="fas fa-plus"></i> Add First Tool
+                </button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card mt-20">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-share-alt"></i> Import/Export
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20">
+            <div style="flex: 1;">
+                <h4 style="color: var(--accent); margin-bottom: 15px;">Export Workflow</h4>
+                <p style="color: var(--text-muted); margin-bottom: 15px;">Export this workflow as JSON</p>
+                <button onclick="exportWorkflow()" class="btn btn-success">
+                    <i class="fas fa-download"></i> Export as JSON
+                </button>
+            </div>
+            <div style="flex: 1;">
+                <h4 style="color: var(--accent); margin-bottom: 15px;">Import Workflow</h4>
+                <p style="color: var(--text-muted); margin-bottom: 15px;">Import a workflow from a JSON file</p>
+                <form id="importForm" action="{{ url_for('import_workflow') }}" method="POST" enctype="multipart/form-data">
+                    <div class="d-flex gap-10">
+                        <input type="file" name="file" accept=".json" class="form-control" style="flex: 1;">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-upload"></i> Import
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let toolCounter = {{ workflow.tools|length if workflow else 0 }};
+    const colors = ['#4a86e8', '#5cb85c', '#f0ad4e', '#d9534f', '#5bc0de'];
+    const icons = ['terminal', 'search', 'filter', 'folder', 'eye', 'bug', 'shield-alt', 'network-wired'];
+    
+    function addTool() {
+        toolCounter++;
+        const toolId = 'tool_' + Date.now();
+        const color = colors[toolCounter % colors.length];
+        const icon = icons[toolCounter % icons.length];
+        
+        const toolHtml = `
+        <div class="tool-node" data-tool-id="${toolId}">
+            <div class="tool-icon" style="background: ${color};">
+                <i class="fas fa-${icon}"></i>
+            </div>
+            <div class="tool-content">
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header d-flex justify-between align-center">
+                        <input type="text" class="form-control" style="width: auto; background: transparent; border: none; color: white; font-weight: bold; font-size: 16px;" 
+                               value="Tool ${toolCounter}" onchange="updateToolName(this, '${toolId}')">
+                        <div class="d-flex gap-10">
+                            <select class="form-control" style="width: auto; padding: 5px 10px;" onchange="updateToolColor(this, '${toolId}')">
+                                <option value="#4a86e8">Blue</option>
+                                <option value="#5cb85c">Green</option>
+                                <option value="#f0ad4e">Orange</option>
+                                <option value="#d9534f">Red</option>
+                                <option value="#5bc0de">Cyan</option>
+                            </select>
+                            <div class="form-check" style="display: flex; align-items: center;">
+                                <input type="checkbox" class="form-check-input" id="enabled${toolId}" checked onchange="updateToolEnabled(this, '${toolId}')">
+                                <label class="form-check-label" for="enabled${toolId}" style="margin-left: 5px;">Enabled</label>
+                            </div>
+                            <button onclick="removeTool('${toolId}')" class="btn btn-danger btn-sm">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex gap-20" style="flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 250px;">
+                                <div class="form-group">
+                                    <label class="form-label">Command/Path</label>
+                                    <input type="text" class="form-control tool-command" placeholder="e.g., assetfinder, /usr/bin/nuclei">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Arguments Template</label>
+                                    <input type="text" class="form-control tool-args" placeholder="e.g., {0}, -l {1}, --input {2}">
+                                    <div class="form-text">
+                                        Use {0} for initial input, {1} for tool 1 output, etc.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Update Command</label>
+                                    <input type="text" class="form-control tool-update-command" placeholder="e.g., -update, --update-templates">
+                                    <div class="form-text">
+                                        Command arguments to update this tool
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="flex: 1; min-width: 250px;">
+                                <div class="form-group">
+                                    <label class="form-label">Input Source</label>
+                                    <select class="form-control tool-input-source" onchange="toggleSpecificStep(this)">
+                                        <option value="initial">Initial Input ({0})</option>
+                                        <option value="previous" selected>Previous Tool Output</option>
+                                        <option value="specific">Specific Tool Output</option>
+                                    </select>
+                                </div>
+                                <div class="form-group tool-specific-step" style="display: none;">
+                                    <label class="form-label">Use Output from Tool #</label>
+                                    <input type="number" class="form-control" value="1" min="1" max="10">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Description</label>
+                                    <textarea class="form-control tool-description" rows="2" placeholder="Tool description"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Last Updated</label>
+                                    <input type="text" class="form-control" value="Never updated" readonly style="background: var(--primary);">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="tool-connector"></div>
+        </div>
+        `;
+        
+        const noTools = document.getElementById('no-tools');
+        if (noTools) {
+            noTools.remove();
+        }
+        
+        document.getElementById('toolChain').insertAdjacentHTML('beforeend', toolHtml);
+        const select = document.querySelector(`[data-tool-id="${toolId}"] select`);
+        select.value = color;
+    }
+    
+    function removeTool(toolId) {
+        const element = document.querySelector(`[data-tool-id="${toolId}"]`);
+        if (element) {
+            element.remove();
+        }
+        
+        const toolChain = document.getElementById('toolChain');
+        if (toolChain.children.length === 0) {
+            toolChain.innerHTML = `
+            <div id="no-tools" class="text-center" style="padding: 40px;">
+                <i class="fas fa-tools" style="font-size: 48px; color: var(--text-muted); margin-bottom: 20px;"></i>
+                <h3 style="color: var(--text-muted);">No tools configured</h3>
+                <p style="color: var(--text-muted);">Add tools to build your workflow</p>
+                <button onclick="addTool()" class="btn btn-primary mt-20">
+                    <i class="fas fa-plus"></i> Add First Tool
+                </button>
+            </div>
+            `;
+        }
+    }
+    
+    function updateToolName(input, toolId) {
+        // Update tool name if needed
+    }
+    
+    function updateToolColor(select, toolId) {
+        const icon = document.querySelector(`[data-tool-id="${toolId}"] .tool-icon`);
+        if (icon) {
+            icon.style.backgroundColor = select.value;
+        }
+    }
+    
+    function updateToolEnabled(checkbox, toolId) {
+        // Handle enabled/disabled state
+    }
+    
+    function toggleSpecificStep(select) {
+        const specificStep = select.closest('.tool-node').querySelector('.tool-specific-step');
+        if (select.value === 'specific') {
+            specificStep.style.display = 'block';
+        } else {
+            specificStep.style.display = 'none';
+        }
+    }
+    
+    function saveWorkflow() {
+        const workflowName = document.getElementById('workflowName').value;
+        const workflowDescription = document.getElementById('workflowDescription').value;
+        
+        const tools = [];
+        const toolNodes = document.querySelectorAll('.tool-node');
+        
+        toolNodes.forEach((node, index) => {
+            const toolId = node.dataset.toolId;
+            const name = node.querySelector('input[type="text"]').value;
+            const command = node.querySelector('.tool-command').value;
+            const args = node.querySelector('.tool-args').value;
+            const inputSource = node.querySelector('.tool-input-source').value;
+            const specificStep = inputSource === 'specific' ? 
+                parseInt(node.querySelector('.tool-specific-step input').value) : null;
+            const description = node.querySelector('.tool-description').value;
+            const updateCommand = node.querySelector('.tool-update-command').value;
+            const color = node.querySelector('.tool-icon').style.backgroundColor;
+            const enabled = node.querySelector('input[type="checkbox"]').checked;
+            
+            tools.push({
+                id: toolId,
+                name: name,
+                command: command,
+                args_template: args,
+                input_source: inputSource,
+                specific_step: specificStep,
+                description: description,
+                color: color,
+                enabled: enabled,
+                update_command: updateCommand
+            });
+        });
+        
+        const workflowData = {
+            name: workflowName,
+            description: workflowDescription,
+            tools: tools
+        };
+        
+        {% if workflow %}
+        workflowData.id = '{{ workflow.id }}';
+        workflowData.created_at = '{{ workflow.created_at }}';
+        {% endif %}
+        
+        fetch('{{ url_for("create_workflow") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(workflowData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('Workflow saved successfully!', 'success');
+                window.location.href = '{{ url_for("index") }}';
+            } else {
+                showAlert('Error saving workflow: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            showAlert('Error saving workflow: ' + error, 'danger');
+        });
+    }
+    
+    function exportWorkflow() {
+        const workflowName = document.getElementById('workflowName').value;
+        const workflowDescription = document.getElementById('workflowDescription').value;
+        
+        const tools = [];
+        const toolNodes = document.querySelectorAll('.tool-node');
+        
+        toolNodes.forEach((node, index) => {
+            const toolId = node.dataset.toolId;
+            const name = node.querySelector('input[type="text"]').value;
+            const command = node.querySelector('.tool-command').value;
+            const args = node.querySelector('.tool-args').value;
+            const inputSource = node.querySelector('.tool-input-source').value;
+            const specificStep = inputSource === 'specific' ? 
+                parseInt(node.querySelector('.tool-specific-step input').value) : null;
+            const description = node.querySelector('.tool-description').value;
+            const updateCommand = node.querySelector('.tool-update-command').value;
+            const color = node.querySelector('.tool-icon').style.backgroundColor;
+            const enabled = node.querySelector('input[type="checkbox"]').checked;
+            
+            tools.push({
+                id: toolId,
+                name: name,
+                command: command,
+                args_template: args,
+                input_source: inputSource,
+                specific_step: specificStep,
+                description: description,
+                color: color,
+                enabled: enabled,
+                update_command: updateCommand
+            });
+        });
+        
+        const workflowData = {
+            name: workflowName,
+            description: workflowDescription,
+            tools: tools,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+        
+        const dataStr = JSON.stringify(workflowData, null, 2);
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+        
+        const exportFileDefaultName = workflowName.replace(/\s+/g, '_').toLowerCase() + '_workflow.json';
+        
+        const linkElement = document.createElement('a');
+        linkElement.setAttribute('href', dataUri);
+        linkElement.setAttribute('download', exportFileDefaultName);
+        linkElement.click();
+    }
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        const inputSources = document.querySelectorAll('.tool-input-source');
+        inputSources.forEach(select => {
+            select.addEventListener('change', function() {
+                toggleSpecificStep(this);
+            });
+        });
+    });
+</script>
+{% endblock %}
