@@ -818,7 +818,7 @@ def execution_status(execution_id):
         'has_results': len(ordered_results) > 0
     }
     
-    return render_template('executions.html', **template_data)
+    return render_template('execution_detail.html', **template_data)
 
 @app.route('/execution/<execution_id>/status')
 @app.route('/api/execution/<execution_id>/status')
