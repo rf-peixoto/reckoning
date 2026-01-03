@@ -33,3 +33,7 @@ Reckoning is sponsored by:  _the-street.xyz_, a private forum for cybersecurity,
 ```
 Bitcoin   [BTC]     bc1qflkwmca89fzw9gfpg6dkf0es9ctnm2ktcq03dp
 ```
+
+## TODO
+- [ ] Create a custom configuration for tools so that the same tool does not need to be configured separately in every workflow that uses it. The user will then be able to choose the configured tools.
+
