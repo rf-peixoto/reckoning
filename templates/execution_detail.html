@@ -1,199 +1,343 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Execution {{ execution.id }}</title>
+<!-- templates/execution_detail.html -->
+{% extends "base.html" %}
 
-    <style>
-        body {
-            font-family: monospace;
-            background-color: #0d1117;
-            color: #c9d1d9;
-            margin: 0;
-            padding: 24px;
-        }
-
-        h1, h2, h3 {
-            font-weight: normal;
-            color: #58a6ff;
-            margin-bottom: 10px;
-        }
-
-        h1 {
-            font-size: 22px;
-        }
-
-        h2 {
-            font-size: 18px;
-            margin-top: 30px;
-        }
-
-        h3 {
-            font-size: 15px;
-            color: #79c0ff;
-        }
-
-        .meta {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 16px;
-            margin-bottom: 24px;
-        }
-
-        .meta p {
-            margin: 4px 0;
-            font-size: 13px;
-        }
-
-        .status {
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .status.running {
-            color: #d29922;
-        }
-
-        .status.completed {
-            color: #3fb950;
-        }
-
-        .status.failed {
-            color: #f85149;
-        }
-
-        .tool-result {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 14px;
-            margin-bottom: 16px;
-        }
-
-        pre {
-            background: #0d1117;
-            border: 1px solid #30363d;
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 12px;
-            line-height: 1.4;
-            overflow-x: auto;
-            white-space: pre-wrap;
-        }
-
-        .error {
-            color: #f85149;
-            margin-bottom: 6px;
-        }
-
-        em {
-            color: #8b949e;
-            font-size: 12px;
-        }
-    </style>
-</head>
-
-<body>
-
-<h1>Execution Details</h1>
-
-<div class="meta">
-    <p><strong>ID:</strong> {{ execution.id }}</p>
-    <p><strong>Workflow:</strong> {{ execution.workflow_name }}</p>
-    <p><strong>Target:</strong> {{ execution.target }}</p>
-    <p>
-        <strong>Status:</strong>
-        <span id="exec-status" class="status {{ execution.status }}">
-            {{ execution.status }}
-        </span>
-    </p>
-    <p><strong>Started:</strong> {{ execution.start_time }}</p>
-    <p><strong>Finished:</strong> {{ execution.end_time or "—" }}</p>
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+  <h2 style="color: var(--accent);">
+    <i class="fas fa-play-circle"></i> Execution Details
+  </h2>
+  <div class="d-flex gap-10">
+    <a href="{{ url_for('executions_list') }}" class="btn btn-secondary">
+      <i class="fas fa-history"></i> History
+    </a>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">
+      <i class="fas fa-arrow-left"></i> Dashboard
+    </a>
+  </div>
 </div>
 
-<h2>Tool Results</h2>
-
-<div id="tool-results">
-{% if execution.results %}
-    {% for tool_id, result in execution.results.items() %}
-        <div class="tool-result">
-            <h3>{{ tool_id }}</h3>
-
-            {% if result.error %}
-                <div class="error"><strong>Error</strong></div>
-                <pre>{{ result.error }}</pre>
-            {% endif %}
-
-            {% if result.output %}
-                <pre>{{ result.output }}</pre>
-            {% endif %}
-
-            {% if not result.output and not result.error %}
-                <em>No output produced.</em>
-            {% endif %}
+<div class="card mb-20">
+  <div class="card-header">
+    <div class="d-flex justify-between align-center">
+      <div>
+        <div style="font-size: 18px; font-weight: bold; color: var(--text);">
+          {{ execution.workflow_name }}
         </div>
-    {% endfor %}
-{% else %}
-    <em>No results available yet.</em>
-{% endif %}
+        <div style="color: var(--text-muted); font-size: 13px;">
+          {{ execution.workflow_description }}
+        </div>
+      </div>
+      <div class="badge" id="execStatusBadge" style="background: var(--secondary); border: 1px solid var(--border);">
+        <span id="execStatusText">{{ execution.status }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="d-flex gap-20 flex-wrap" style="font-size: 13px; color: var(--text-muted);">
+      <div><strong style="color: var(--text);">Execution ID:</strong> <span id="execId">{{ execution.execution_id }}</span></div>
+      <div><strong style="color: var(--text);">Domain:</strong> <span id="execDomain">{{ execution.domain }}</span></div>
+      <div><strong style="color: var(--text);">Created:</strong> <span id="execCreated">{{ execution.created_at }}</span></div>
+      <div><strong style="color: var(--text);">Started:</strong> <span id="execStarted">{{ execution.started_at or "—" }}</span></div>
+      <div><strong style="color: var(--text);">Completed:</strong> <span id="execCompleted">{{ execution.completed_at or "—" }}</span></div>
+      <div><strong style="color: var(--text);">Version:</strong> <span id="execVersion">{{ execution.version }}</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-20">
+  <div class="card-header d-flex justify-between align-center">
+    <div style="font-weight: bold; color: var(--text);">
+      <i class="fas fa-tools"></i> Tools
+    </div>
+    <div style="color: var(--text-muted); font-size: 12px;">
+      Outputs are fetched on-demand to reduce payload size.
+    </div>
+  </div>
+
+  <div class="card-body" id="toolsContainer">
+    {% if tool_order and tool_order|length > 0 %}
+      {% for tool in tool_order %}
+        <div class="tool-card mb-10" style="background: var(--primary); border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
+          <div class="d-flex justify-between align-center">
+            <div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width: 10px; height: 10px; border-radius: 50%; background: {{ tool.color or 'var(--accent)' }};"></div>
+                <div style="font-weight: bold; color: var(--text);">{{ tool.name }}</div>
+                {% if not tool.enabled %}
+                  <span class="badge" style="background: var(--secondary); border: 1px solid var(--border); color: var(--text-muted);">disabled</span>
+                {% endif %}
+              </div>
+              <div style="color: var(--text-muted); font-size: 12px; margin-top: 2px;">{{ tool.description }}</div>
+            </div>
+
+            <div class="d-flex gap-10 align-center">
+              <span class="badge" id="toolStatus_{{ tool.id }}" style="background: var(--secondary); border: 1px solid var(--border); color: var(--text-muted);">
+                pending
+              </span>
+              <button class="btn btn-secondary" style="padding: 6px 10px;" onclick="toggleToolOutput('{{ tool.id }}')" id="btn_{{ tool.id }}" disabled>
+                <i class="fas fa-eye"></i> View
+              </button>
+            </div>
+          </div>
+
+          <div id="outputWrap_{{ tool.id }}" style="display:none; margin-top: 10px;">
+            <div class="d-flex justify-between align-center mb-10">
+              <div style="color: var(--text-muted); font-size: 12px;">
+                <span id="meta_{{ tool.id }}"></span>
+              </div>
+              <button class="btn btn-secondary" style="padding: 6px 10px;" onclick="refreshToolOutput('{{ tool.id }}')">
+                <i class="fas fa-rotate"></i> Refresh output
+              </button>
+            </div>
+
+            <div class="d-flex gap-10 flex-wrap">
+              <div style="flex:1; min-width: 280px;">
+                <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 6px;"><strong style="color: var(--text);">STDOUT</strong></div>
+                <pre class="code-block" id="stdout_{{ tool.id }}" style="max-height: 380px; overflow:auto;"></pre>
+              </div>
+              <div style="flex:1; min-width: 280px;">
+                <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 6px;"><strong style="color: var(--text);">STDERR</strong></div>
+                <pre class="code-block" id="stderr_{{ tool.id }}" style="max-height: 380px; overflow:auto;"></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div style="color: var(--text-muted);">No tools found for this workflow.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-20">
+  <div class="card-header d-flex justify-between align-center">
+    <div style="font-weight: bold; color: var(--text);">
+      <i class="fas fa-stream"></i> Event Trail
+    </div>
+    <button class="btn btn-secondary" style="padding: 6px 10px;" onclick="refreshEvents()">
+      <i class="fas fa-rotate"></i> Refresh
+    </button>
+  </div>
+  <div class="card-body">
+    <div id="eventsBox" class="code-block" style="max-height: 280px; overflow:auto; font-size: 12px;"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-between align-center">
+    <div style="font-weight: bold; color: var(--text);">
+      <i class="fas fa-code"></i> Raw JSON (debug)
+    </div>
+    <button class="btn btn-secondary" style="padding: 6px 10px;" onclick="toggleJson()">
+      <i class="fas fa-chevron-down"></i> Toggle
+    </button>
+  </div>
+  <div class="card-body" id="jsonWrap" style="display:none;">
+    <pre class="code-block" id="rawJson" style="max-height: 320px; overflow:auto;"></pre>
+  </div>
 </div>
 
 <script>
-    const executionId = "{{ execution.id }}";
+  const executionId = "{{ execution.execution_id }}";
 
-    async function refreshStatus() {
-        try {
-            const resp = await fetch(`/api/execution/${executionId}/status`);
-            if (!resp.ok) return;
+  // Client-side cache to avoid re-fetching large outputs unnecessarily
+  const toolCache = {}; // tool_id -> { output_sha256, error_sha256, loaded: bool }
 
-            const data = await resp.json();
+  let pollDelayMs = 1000;
+  const pollDelayMaxMs = 8000;
+  let lastVersion = Number("{{ execution.version or 0 }}") || 0;
+  let pollTimer = null;
 
-            const statusEl = document.getElementById("exec-status");
-            statusEl.textContent = data.status;
-            statusEl.className = "status " + data.status;
+  function setStatusBadge(status) {
+    const badge = document.getElementById("execStatusBadge");
+    const text = document.getElementById("execStatusText");
+    text.textContent = status;
 
-            const container = document.getElementById("tool-results");
-            container.innerHTML = "";
+    let color = "var(--text-muted)";
+    if (status === "running") color = "var(--warning)";
+    if (status === "completed") color = "var(--success)";
+    if (status === "failed") color = "var(--danger)";
 
-            if (data.results && Object.keys(data.results).length > 0) {
-                for (const [tool, result] of Object.entries(data.results)) {
-                    const div = document.createElement("div");
-                    div.className = "tool-result";
+    badge.style.color = color;
+    badge.style.borderColor = "var(--border)";
+  }
 
-                    let html = `<h3>${tool}</h3>`;
+  function setToolStatus(toolId, status) {
+    const el = document.getElementById(`toolStatus_${toolId}`);
+    if (!el) return;
 
-                    if (result.error) {
-                        html += `<div class="error"><strong>Error</strong></div><pre>${result.error}</pre>`;
-                    }
+    el.textContent = status;
 
-                    if (result.output) {
-                        html += `<pre>${result.output}</pre>`;
-                    }
+    let color = "var(--text-muted)";
+    if (status === "running") color = "var(--warning)";
+    if (status === "completed") color = "var(--success)";
+    if (status === "failed") color = "var(--danger)";
+    if (status === "skipped") color = "var(--text-muted)";
 
-                    if (!result.output && !result.error) {
-                        html += `<em>No output produced.</em>`;
-                    }
+    el.style.color = color;
 
-                    div.innerHTML = html;
-                    container.appendChild(div);
-                }
-            } else {
-                container.innerHTML = "<em>No results available yet.</em>";
-            }
+    // Enable view button only when tool has finished (or failed)
+    const btn = document.getElementById(`btn_${toolId}`);
+    if (btn) {
+      btn.disabled = !(status === "completed" || status === "failed");
+    }
+  }
 
-            if (data.status === "completed" || data.status === "failed") {
-                clearInterval(pollInterval);
-            }
+  function renderEvents(events) {
+    const box = document.getElementById("eventsBox");
+    if (!events || events.length === 0) {
+      box.textContent = "No events yet.";
+      return;
+    }
+    // Use textContent to avoid injecting HTML from log messages
+    const lines = events.map(e => {
+      const tool = e.tool_id ? ` tool=${e.tool_id}` : "";
+      return `${e.ts} [${e.level}] ${e.type}${tool} - ${e.message}`;
+    });
+    box.textContent = lines.join("\n");
+  }
 
-        } catch (e) {
-            console.error("Polling failed:", e);
+  function renderRawJson(obj) {
+    const el = document.getElementById("rawJson");
+    el.textContent = JSON.stringify(obj, null, 2);
+  }
+
+  async function refreshEvents() {
+    try {
+      const resp = await fetch(`/api/execution/${executionId}/events`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      renderEvents(data.events || []);
+    } catch (e) {
+      // silent in UI; console for debugging
+      console.error("Events fetch failed:", e);
+    }
+  }
+
+  async function refreshToolOutput(toolId) {
+    try {
+      const resp = await fetch(`/api/execution/${executionId}/results/${toolId}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      // Update cache hashes
+      toolCache[toolId] = toolCache[toolId] || {};
+      toolCache[toolId].output_sha256 = data.output_sha256 || "";
+      toolCache[toolId].error_sha256 = data.error_sha256 || "";
+      toolCache[toolId].loaded = true;
+
+      // Use textContent (not innerHTML) to avoid XSS from tool output
+      document.getElementById(`stdout_${toolId}`).textContent = data.output || "";
+      document.getElementById(`stderr_${toolId}`).textContent = data.error || "";
+
+      const meta = [];
+      if (data.start_time) meta.push(`start=${data.start_time}`);
+      if (data.end_time) meta.push(`end=${data.end_time}`);
+      if (typeof data.exit_code !== "undefined" && data.exit_code !== null) meta.push(`exit=${data.exit_code}`);
+      meta.push(`stdout_len=${data.output_len || 0}`);
+      meta.push(`stderr_len=${data.error_len || 0}`);
+      document.getElementById(`meta_${toolId}`).textContent = meta.join(" | ");
+
+    } catch (e) {
+      console.error("Tool output fetch failed:", e);
+    }
+  }
+
+  function toggleToolOutput(toolId) {
+    const wrap = document.getElementById(`outputWrap_${toolId}`);
+    if (!wrap) return;
+
+    const willShow = (wrap.style.display === "none");
+    wrap.style.display = willShow ? "block" : "none";
+
+    if (willShow) {
+      // If not loaded yet, fetch now
+      if (!toolCache[toolId] || !toolCache[toolId].loaded) {
+        refreshToolOutput(toolId);
+      }
+    }
+  }
+
+  function toggleJson() {
+    const wrap = document.getElementById("jsonWrap");
+    wrap.style.display = (wrap.style.display === "none") ? "block" : "none";
+  }
+
+  async function pollStatus() {
+    try {
+      const resp = await fetch(`/api/execution/${executionId}/status`);
+      if (!resp.ok) {
+        scheduleNextPoll(true);
+        return;
+      }
+
+      const data = await resp.json();
+      renderRawJson(data);
+
+      const version = Number(data.version || 0);
+      document.getElementById("execVersion").textContent = String(version);
+      document.getElementById("execStarted").textContent = data.started_at || "—";
+      document.getElementById("execCompleted").textContent = data.completed_at || "—";
+      setStatusBadge(data.status || "unknown");
+
+      // Update tool statuses from summaries
+      const summaries = data.results_summary || {};
+      for (const [toolId, summary] of Object.entries(summaries)) {
+        setToolStatus(toolId, summary.status || "pending");
+
+        // If output view is open, refresh only if hashes changed
+        const wrap = document.getElementById(`outputWrap_${toolId}`);
+        const isOpen = wrap && wrap.style.display !== "none";
+        if (isOpen) {
+          toolCache[toolId] = toolCache[toolId] || {};
+          const outHash = summary.output_sha256 || "";
+          const errHash = summary.error_sha256 || "";
+          if (toolCache[toolId].output_sha256 !== outHash || toolCache[toolId].error_sha256 !== errHash) {
+            refreshToolOutput(toolId);
+          }
         }
+      }
+
+      // Update event tail quickly
+      if (data.events_tail) {
+        renderEvents(data.events_tail);
+      }
+
+      // Backoff control: reset delay on changes; backoff if no changes
+      const changed = (version !== lastVersion);
+      lastVersion = version;
+
+      const isTerminal = (data.status === "completed" || data.status === "failed");
+
+      if (changed) {
+        pollDelayMs = 1000;
+      } else if (!isTerminal) {
+        pollDelayMs = Math.min(pollDelayMs * 2, pollDelayMaxMs);
+      }
+
+      scheduleNextPoll(isTerminal);
+
+    } catch (e) {
+      console.error("Status polling failed:", e);
+      scheduleNextPoll(true);
+    }
+  }
+
+  function scheduleNextPoll(isTerminalOrError) {
+    if (pollTimer) clearTimeout(pollTimer);
+
+    if (isTerminalOrError) {
+      // One last events refresh for completeness
+      refreshEvents();
+      return;
     }
 
-    const pollInterval = setInterval(refreshStatus, 2000);
-</script>
+    pollTimer = setTimeout(pollStatus, pollDelayMs);
+  }
 
-</body>
-</html>
+  // Initial render
+  setStatusBadge("{{ execution.status }}");
+  renderEvents({{ (execution.events or [])[-20:] | tojson }});
+  pollStatus();
+</script>
+{% endblock %}

@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file, send_from_directory
-import os, json, uuid, subprocess, threading, time, re, tempfile, shutil, csv
+import os, json, uuid, subprocess, threading, time, re, tempfile, shutil, csv, hashlib
 from datetime import datetime
 import logging
 from typing import Dict, List, Optional, Any
@@ -18,13 +18,73 @@ os.makedirs('backups', exist_ok=True)
 os.makedirs('img', exist_ok=True)  # Ensure img directory exists
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+# Logging (structured-ish): include execution_id/tool_id when provided via 'extra'
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+_log_fmt = "%(asctime)s %(levelname)s %(name)s exec=%(execution_id)s tool=%(tool_id)s - %(message)s"
+class _SafeExtraFormatter(logging.Formatter):
+    def format(self, record):
+        if not hasattr(record, "execution_id"):
+            record.execution_id = "-"
+        if not hasattr(record, "tool_id"):
+            record.tool_id = "-"
+        return super().format(record)
+
+_formatter = _SafeExtraFormatter(_log_fmt)
+
+# Console handler
+_ch = logging.StreamHandler()
+_ch.setLevel(logging.INFO)
+_ch.setFormatter(_formatter)
+logger.addHandler(_ch)
+
+# File handler (rotating)
+try:
+    from logging.handlers import RotatingFileHandler
+    _fh = RotatingFileHandler("logs/app.log", maxBytes=2_000_000, backupCount=5, encoding="utf-8")
+    _fh.setLevel(logging.DEBUG)
+    _fh.setFormatter(_formatter)
+    logger.addHandler(_fh)
+except Exception as _e:
+    logger.warning(f"Failed to initialize file logging: {_e}")
+
 
 # Database simulation
 workflows_db = OrderedDict()
 execution_history = OrderedDict()
 update_history = OrderedDict()
+
+# Concurrency control for shared in-memory state
+execution_lock = threading.RLock()
+
+def _sha256_text(value: str) -> str:
+    try:
+        return hashlib.sha256((value or "").encode("utf-8", errors="replace")).hexdigest()
+    except Exception:
+        return ""
+
+def _now_iso() -> str:
+    return datetime.now().isoformat()
+
+def _record_event(execution, event_type: str, message: str, level: str = "info", tool_id: str = None):
+    """Append a structured event to an execution and bump its version."""
+    evt = {
+        "ts": _now_iso(),
+        "type": event_type,
+        "level": level,
+        "tool_id": tool_id,
+        "message": message
+    }
+    with execution_lock:
+        if not hasattr(execution, "events") or execution.events is None:
+            execution.events = []
+        execution.events.append(evt)
+        # avoid unbounded growth in memory (keep latest 500)
+        if len(execution.events) > 500:
+            execution.events = execution.events[-500:]
+        execution.version = int(getattr(execution, "version", 0)) + 1
+        execution.last_updated_at = _now_iso()
 
 # Settings file path
 SETTINGS_FILE = 'app_settings.json'
@@ -169,8 +229,9 @@ class ExecutionResult:
 
 class WorkflowExecution:
     """Complete execution instance"""
-    def __init__(self, execution_id, workflow_id, domain, status='queued', 
-                 results=None, created_at=None, started_at=None, completed_at=None):
+    def __init__(self, execution_id, workflow_id, domain, status='queued',
+                 results=None, created_at=None, started_at=None, completed_at=None,
+                 version: int = 0, last_updated_at: str = None, events: list = None):
         self.execution_id = execution_id
         self.workflow_id = workflow_id
         self.domain = domain
@@ -179,18 +240,26 @@ class WorkflowExecution:
         self.created_at = created_at or datetime.now().isoformat()
         self.started_at = started_at
         self.completed_at = completed_at
-    
-    def to_dict(self):
-        return {
+        self.version = int(version or 0)
+        self.last_updated_at = last_updated_at or self.created_at
+        self.events = events or []
+
+    def to_dict(self, include_results: bool = True):
+        data = {
             'execution_id': self.execution_id,
             'workflow_id': self.workflow_id,
             'domain': self.domain,
             'status': self.status,
-            'results': {k: v.to_dict() for k, v in self.results.items()},
             'created_at': self.created_at,
             'started_at': self.started_at,
-            'completed_at': self.completed_at
+            'completed_at': self.completed_at,
+            'version': self.version,
+            'last_updated_at': self.last_updated_at,
+            'events': self.events
         }
+        if include_results:
+            data['results'] = {k: v.to_dict() for k, v in self.results.items()}
+        return data
 
 class UpdateResult:
     """Result of a tool update"""
@@ -355,7 +424,7 @@ def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict
                 # because command-line arguments can't handle multiline strings properly
                 if '\n' in input_content and len(input_content.strip().split('\n')) > 1:
                     logger.warning(f"Multiline content detected for argument input. Creating temp file instead.")
-                    logger.info(f"Content has {len(input_content.strip().split('\n'))} lines")
+                    logger.info(f"Content has {len(input_content.strip().splitlines())} lines")
                     
                     # Create temp file
                     fd, temp_path = tempfile.mkstemp(dir=temp_dir, suffix='.txt')
@@ -562,7 +631,7 @@ def run_workflow_thread(execution: WorkflowExecution):
         
         execution.status = 'running'
         execution.started_at = datetime.now().isoformat()
-        
+        _record_event(execution, 'execution_started', f"Execution started for domain: {execution.domain}")
         logger.info(f"=== STARTING WORKFLOW EXECUTION ===")
         logger.info(f"Execution ID: {execution.execution_id}")
         logger.info(f"Workflow ID: {execution.workflow_id}")
@@ -591,6 +660,7 @@ def run_workflow_thread(execution: WorkflowExecution):
         for idx, tool in enumerate(workflow.tools):
             if not tool.enabled:
                 logger.info(f"Skipping disabled tool: {tool.name}")
+                _record_event(execution, 'tool_skipped', f"Tool skipped (disabled): {tool.name}", tool_id=tool.id)
                 continue
             
             logger.info(f"\n{'='*60}")
@@ -598,9 +668,11 @@ def run_workflow_thread(execution: WorkflowExecution):
             logger.info(f"{'='*60}")
             
             # Execute tool with context
+            _record_event(execution, 'tool_started', f"Tool started: {tool.name}", tool_id=tool.id)
             result = execute_tool(tool, execution.domain, previous_outputs, temp_dir, execution_context)
             execution.results[tool.id] = result
             
+            _record_event(execution, 'tool_finished', f"Tool finished: {tool.name} ({result.status})", level=('error' if result.status=='failed' else 'info'), tool_id=tool.id)
             # Store output for next tools if successful and provides output
             if result.status == 'completed' and tool.provides_output:
                 previous_outputs[tool.id] = {
@@ -618,6 +690,8 @@ def run_workflow_thread(execution: WorkflowExecution):
                 # Continue with next tool even if this one failed
         
         execution.status = 'completed'
+        
+        _record_event(execution, 'execution_completed', 'Execution completed successfully')
         logger.info(f"\n{'='*60}")
         logger.info(f"WORKFLOW EXECUTION COMPLETED")
         logger.info(f"Status: {execution.status}")
@@ -628,6 +702,7 @@ def run_workflow_thread(execution: WorkflowExecution):
     except Exception as e:
         execution.status = 'failed'
         logger.error(f"Workflow execution failed: {e}")
+        _record_event(execution, 'execution_failed', f"Workflow execution failed: {e}", level='error')
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
     finally:
@@ -770,77 +845,111 @@ def execution_status(execution_id):
     execution = execution_history.get(execution_id)
     if not execution:
         return "Execution not found", 404
-    
+
     workflow = workflows_db.get(execution.workflow_id)
-    
-    # Convert execution to dict and add workflow info
-    execution_dict = execution.to_dict()
+
+    execution_dict = execution.to_dict(include_results=False)
     execution_dict['workflow_name'] = workflow.name if workflow else "Unknown Workflow"
     execution_dict['workflow_description'] = workflow.description if workflow else ""
-    
-    # Get tool order from workflow
+
     tool_order = []
     if workflow:
         for tool in workflow.tools:
-            tool_info = {
+            tool_order.append({
                 'id': tool.id,
                 'name': tool.name,
                 'description': tool.description,
                 'color': tool.color,
                 'enabled': tool.enabled
-            }
-            tool_order.append(tool_info)
-    
-    # Prepare results in order
-    ordered_results = []
-    if workflow:
-        for tool in workflow.tools:
-            tool_id = tool.id
-            if tool_id in execution.results:
-                result = execution.results[tool_id]
-                result_dict = result.to_dict()
-                result_dict['tool_config'] = {
-                    'name': tool.name,
-                    'description': tool.description,
-                    'color': tool.color,
-                    'command': tool.command,
-                    'args_template': tool.args_template,
-                    'input_method': tool.input_method,
-                    'output_handling': tool.output_handling
-                }
-                ordered_results.append(result_dict)
-    
-    # Prepare for template rendering
-    template_data = {
-        'execution': execution_dict,
-        'ordered_results': ordered_results,
-        'tool_order': tool_order,
-        'has_results': len(ordered_results) > 0
-    }
-    
-    return render_template('execution_detail.html', **template_data)
+            })
+
+    return render_template('execution_detail.html',
+                           execution=execution_dict,
+                           tool_order=tool_order)
 
 @app.route('/execution/<execution_id>/status')
 @app.route('/api/execution/<execution_id>/status')
 def get_execution_status(execution_id):
-    """API endpoint for real-time status updates"""
+    """API endpoint for lightweight real-time status updates (no large outputs)."""
     execution = execution_history.get(execution_id)
     if not execution:
         return jsonify({'error': 'Execution not found'}), 404
-    
-    # Return JSON response
-    execution_dict = execution.to_dict()
-    
-    # Get workflow info
+
     workflow = workflows_db.get(execution.workflow_id)
-    if workflow:
-        execution_dict['workflow_name'] = workflow.name
-        execution_dict['workflow_description'] = workflow.description
-    else:
-        execution_dict['workflow_name'] = "Unknown Workflow"
-        execution_dict['workflow_description'] = ""
-    
-    return jsonify(execution_dict)
+
+    # Base metadata without full outputs
+    base = execution.to_dict(include_results=False)
+
+    base['workflow_name'] = workflow.name if workflow else "Unknown Workflow"
+    base['workflow_description'] = workflow.description if workflow else ""
+
+    # Summarize tool results to keep payload small
+    results_summary = {}
+    with execution_lock:
+        for tool_id, res in (execution.results or {}).items():
+            out = res.output or ""
+            err = res.error or ""
+            results_summary[tool_id] = {
+                "tool_id": res.tool_id,
+                "tool_name": res.tool_name,
+                "status": res.status,
+                "start_time": res.start_time,
+                "end_time": res.end_time,
+                "exit_code": res.exit_code,
+                "output_len": len(out),
+                "error_len": len(err),
+                "output_sha256": _sha256_text(out) if out else "",
+                "error_sha256": _sha256_text(err) if err else "",
+            }
+
+    base["results_summary"] = results_summary
+    base["events_tail"] = (execution.events or [])[-20:]  # last 20 for quick UI
+
+    return jsonify(base)
+
+@app.route('/api/execution/<execution_id>/results/<tool_id>')
+def get_execution_tool_results(execution_id, tool_id):
+    """Return full stdout/stderr for a single tool (requested on-demand)."""
+    execution = execution_history.get(execution_id)
+    if not execution:
+        return jsonify({'error': 'Execution not found'}), 404
+
+    with execution_lock:
+        res = (execution.results or {}).get(tool_id)
+
+    if not res:
+        return jsonify({'error': 'Tool result not found'}), 404
+
+    out = res.output or ""
+    err = res.error or ""
+    return jsonify({
+        "execution_id": execution_id,
+        "tool_id": tool_id,
+        "tool_name": res.tool_name,
+        "status": res.status,
+        "start_time": res.start_time,
+        "end_time": res.end_time,
+        "exit_code": res.exit_code,
+        "output": out,
+        "error": err,
+        "output_len": len(out),
+        "error_len": len(err),
+        "output_sha256": _sha256_text(out) if out else "",
+        "error_sha256": _sha256_text(err) if err else "",
+    })
+
+@app.route('/api/execution/<execution_id>/events')
+def get_execution_events(execution_id):
+    """Return the event trail for an execution."""
+    execution = execution_history.get(execution_id)
+    if not execution:
+        return jsonify({'error': 'Execution not found'}), 404
+    with execution_lock:
+        return jsonify({
+            "execution_id": execution_id,
+            "version": getattr(execution, "version", 0),
+            "events": execution.events or []
+        })
 
 @app.route('/img/<path:filename>')
 def serve_image(filename):
@@ -1259,13 +1368,13 @@ def create_sample_workflow():
     """Create a sample workflow for demonstration"""
     sample_workflow = Workflow(
         workflow_id="sample-workflow",
-        name="Enhanced Recon Workflow",
+        name="Example Recon Workflow",
         description="Example workflow with proper tool chaining",
         tools=[
             ToolConfig(
                 tool_id="tool_assetfinder",
                 name="Assetfinder",
-                command="/usr/bin/assetfinder",
+                command="/tools/assetfinder",
                 args_template="{domain}",
                 input_source="initial",
                 input_method="argument",
@@ -1280,7 +1389,7 @@ def create_sample_workflow():
             ToolConfig(
                 tool_id="tool_nuclei",
                 name="Nuclei Scanner",
-                command="/home/threatlab/Code/Bash/izanami/nuclei",
+                command="/tools/nuclei",
                 args_template="-l {subdomains}",
                 input_source="previous",
                 input_method="file",
