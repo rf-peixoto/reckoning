@@ -6,7 +6,6 @@ Reckoning is an mayhem offensive operations orchestrator. Think of it as your pe
 ### The Vibe:
 - **Modular AF**: Chain any CLI tool like you're building a custom cyberdeck, including random scripts that I know you use.
 - **Smart Ass Data Flow**: You decide whether the input of one tool will be the output of another.
-- **Dark Mode Default**: Because we're not animals.
 - **Buzzwords for sararymans**: Want to cram AI into something? Go ahead.
 
 
