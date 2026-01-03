@@ -30,4 +30,7 @@ Reckoning is an mayhem offensive operations orchestrator. Think of it as your pe
 6. **Execute** - Pick a target and watch the magic happen.
 
 
-Reckoning is sponsored by:  _the-street.xyz_, a private forum for cybersecurity, threat intelligence, and cipherpunk culture.
+Reckoning is sponsored by:  _the-street.xyz_, a private forum for cybersecurity, threat intelligence, and cipherpunk culture. Feel free to support us too:
+```
+Bitcoin   [BTC]     bc1qflkwmca89fzw9gfpg6dkf0es9ctnm2ktcq03dp
+```
