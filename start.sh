@@ -45,10 +45,10 @@ fi
 
 # Load environment variables if .env exists
 #if [ -f ".env" ]; then
-   # echo "Loading environment variables from .env..."
-    # Simple .env loader (doesn't handle multiline or comments perfectly)
-   # export $(grep -v '^#' .env | xargs)
-   # echo "✓ Environment variables loaded"
+#   echo "Loading environment variables from .env..."
+#   # Simple .env loader (doesn't handle multiline or comments perfectly)
+#   export $(grep -v '^#' .env | xargs)
+#   echo "✓ Environment variables loaded"
 #fi
 
 # Create necessary directories if they don't exist

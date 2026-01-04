@@ -73,7 +73,7 @@ if [ ! -f ".env" ]; then
 FLASK_APP=app.py
 FLASK_ENV=development
 SECRET_KEY=$(openssl rand -hex 24 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(24))")
-MAX_CONTENT_LENGTH=16777216  # 16MB
+MAX_CONTENT_LENGTH=33554432  # 32MB
 
 # Security Settings
 SESSION_TIMEOUT=9999

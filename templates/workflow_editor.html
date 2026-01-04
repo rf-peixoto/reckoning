@@ -80,6 +80,20 @@
                                 <div class="d-flex gap-20" style="flex-wrap: wrap;">
                                     <div style="flex: 1; min-width: 250px;">
                                         <div class="form-group">
+                                            <label class="form-label">Tool Library</label>
+                                            <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
+                                                <option value="">Custom (manual)</option></select>
+                                            <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Tool Library</label>
+                                            <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
+                                                <option value="">Custom (manual)</option>
+                                                ${TOOL_LIBRARY.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
+                                            </select>
+                                            <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
+                                        </div>
+                                        <div class="form-group">
                                             <label class="form-label">Command/Path</label>
                                             <input type="text" class="form-control tool-command" 
                                                    value="{{ tool.command }}" 
@@ -187,6 +201,8 @@
 
 {% block scripts %}
 <script>
+    const TOOL_LIBRARY = {{ (tool_library or []) | tojson }};
+
     let toolCounter = {{ workflow.tools|length if workflow else 0 }};
     const colors = ['#4a86e8', '#5cb85c', '#f0ad4e', '#d9534f', '#5bc0de'];
     const icons = ['terminal', 'search', 'filter', 'folder', 'eye', 'bug', 'shield-alt', 'network-wired'];
@@ -228,7 +244,21 @@
                         <div class="d-flex gap-20" style="flex-wrap: wrap;">
                             <div style="flex: 1; min-width: 250px;">
                                 <div class="form-group">
-                                    <label class="form-label">Command/Path</label>
+                                    <label class="form-label">Tool Library</label>
+                                            <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
+                                                <option value="">Custom (manual)</option></select>
+                                            <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Tool Library</label>
+                                            <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
+                                                <option value="">Custom (manual)</option>
+                                                ${TOOL_LIBRARY.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
+                                            </select>
+                                            <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Command/Path</label>
                                     <input type="text" class="form-control tool-command" placeholder="e.g., assetfinder, /usr/bin/nuclei">
                                 </div>
                                 <div class="form-group">
@@ -307,7 +337,27 @@
         }
     }
     
-    function updateToolName(input, toolId) {
+    
+    function applyToolLibrary(selectEl) {
+        const toolNode = selectEl.closest('.tool-node');
+        const toolId = selectEl.value;
+        if (!toolId) return;
+
+        const preset = TOOL_LIBRARY.find(t => t.id === toolId);
+        if (!preset) return;
+
+        // Populate fields with library defaults
+        const cmdEl = toolNode.querySelector('.tool-command');
+        const argsEl = toolNode.querySelector('.tool-args');
+        const updEl = toolNode.querySelector('.tool-update-command');
+        const descEl = toolNode.querySelector('.tool-description');
+
+        if (cmdEl) cmdEl.value = preset.path || '';
+        if (argsEl) argsEl.value = preset.default_command || '';
+        if (updEl) updEl.value = preset.update_command || '';
+        if (descEl) descEl.value = preset.description || '';
+    }
+function updateToolName(input, toolId) {
         // Update tool name if needed
     }
     
@@ -341,12 +391,27 @@
         toolNodes.forEach((node, index) => {
             const toolId = node.dataset.toolId;
             const name = node.querySelector('input[type="text"]').value;
+            const libraryToolId = (node.querySelector('.tool-library-select') || {}).value || null;
             const command = node.querySelector('.tool-command').value;
             const args = node.querySelector('.tool-args').value;
             const inputSource = node.querySelector('.tool-input-source').value;
             const specificStep = inputSource === 'specific' ? 
                 parseInt(node.querySelector('.tool-specific-step input').value) : null;
             const description = node.querySelector('.tool-description').value;
+            let commandOverride = null;
+            let argsOverride = null;
+            let updateOverride = null;
+            let descriptionOverride = null;
+            if (libraryToolId) {
+                const preset = TOOL_LIBRARY.find(t => t.id === libraryToolId);
+                if (preset) {
+                    if ((command || '') !== (preset.path || '')) commandOverride = command;
+                    if ((args || '') !== (preset.default_command || '')) argsOverride = args;
+                    const updVal = (node.querySelector('.tool-update-command')||{}).value || '';
+                    if (updVal !== (preset.update_command || '')) updateOverride = updVal;
+                    if ((description || '') !== (preset.description || '')) descriptionOverride = description;
+                }
+            }
             const updateCommand = node.querySelector('.tool-update-command').value;
             const color = node.querySelector('.tool-icon').style.backgroundColor;
             const enabled = node.querySelector('input[type="checkbox"]').checked;
@@ -354,8 +419,13 @@
             tools.push({
                 id: toolId,
                 name: name,
+                library_tool_id: libraryToolId,
                 command: command,
                 args_template: args,
+                command_override: commandOverride,
+                args_template_override: argsOverride,
+                update_command_override: updateOverride,
+                description_override: descriptionOverride,
                 input_source: inputSource,
                 specific_step: specificStep,
                 description: description,

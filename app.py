@@ -103,12 +103,19 @@ DEFAULT_SETTINGS = {
     'enable_auto_updates': False,      # Check for tool updates
     'output_directory': 'exports',    # Default output directory
     'temp_directory': '',             # Custom temp directory (empty = system default)
-    'enable_debug_mode': False        # Enable debug mode for tools
+    'enable_debug_mode': False,       # Enable debug mode for tools
+    'tool_library': [],              # Global configured tools
+    'wordlists': {}                  # Named wordlists e.g. {'wordlist1':'/path/to/file'}
 }
 
 class ToolConfig:
     """Configuration for a single tool/module"""
-    def __init__(self, tool_id, name, command, args_template, input_source='previous', 
+    def __init__(self, tool_id, name, command='', args_template='', input_source='previous',
+                 library_tool_id=None,
+                 command_override=None,
+                 args_template_override=None,
+                 update_command_override=None,
+                 description_override=None,
                  specific_step=None, description="", color="#4a86e8", enabled=True,
                  update_command="", last_updated=None, 
                  input_method='argument',
@@ -119,6 +126,14 @@ class ToolConfig:
                  placeholder_name='input'):
         self.id = tool_id
         self.name = name
+        self.library_tool_id = library_tool_id
+        # Overrides: if None, value will be resolved from tool library at execution time
+        self.command_override = command_override
+        self.args_template_override = args_template_override
+        self.update_command_override = update_command_override
+        self.description_override = description_override
+
+        # Backward-compatible fields (may be empty when using tool library)
         self.command = command
         self.args_template = args_template
         self.input_source = input_source
@@ -142,6 +157,11 @@ class ToolConfig:
             'name': self.name,
             'command': self.command,
             'args_template': self.args_template,
+            'library_tool_id': self.library_tool_id,
+            'command_override': self.command_override,
+            'args_template_override': self.args_template_override,
+            'update_command_override': self.update_command_override,
+            'description_override': self.description_override,
             'input_source': self.input_source,
             'specific_step': self.specific_step,
             'description': self.description,
@@ -163,9 +183,14 @@ class ToolConfig:
         return cls(
             tool_id=data.get('id', str(uuid.uuid4())),
             name=data['name'],
-            command=data['command'],
-            args_template=data['args_template'],
+            command=data.get('command',''),
+            args_template=data.get('args_template',''),
             input_source=data.get('input_source', 'previous'),
+            library_tool_id=data.get('library_tool_id'),
+            command_override=data.get('command_override'),
+            args_template_override=data.get('args_template_override'),
+            update_command_override=data.get('update_command_override'),
+            description_override=data.get('description_override'),
             specific_step=data.get('specific_step'),
             description=data.get('description', ''),
             color=data.get('color', '#4a86e8'),
@@ -304,6 +329,46 @@ def parse_args_template(template: str, context: Dict[str, Any]) -> str:
     logger.debug(f"Parsed template result: {template}")
     return template
 
+def resolve_tool_from_library(tool: ToolConfig, settings: Dict[str, Any]) -> Dict[str, str]:
+    """Resolve effective command/args/update/description for a workflow tool step.
+
+    If tool.library_tool_id is set, merge the library tool definition with any per-step overrides.
+    """
+    library = settings.get('tool_library', []) or []
+    lib_entry = None
+    if tool.library_tool_id:
+        for t in library:
+            if t.get('id') == tool.library_tool_id:
+                lib_entry = t
+                break
+
+    def pick(field_name: str, override_value, fallback_value: str) -> str:
+        if override_value is not None and str(override_value).strip() != "":
+            return str(override_value)
+        if fallback_value is None:
+            return ""
+        return str(fallback_value)
+
+    if lib_entry:
+        effective_command = pick('path', tool.command_override, lib_entry.get('path', lib_entry.get('command', '')))
+        effective_args = pick('default_command', tool.args_template_override, lib_entry.get('default_command', lib_entry.get('args_template', '')))
+        effective_update = pick('update_command', tool.update_command_override, lib_entry.get('update_command', ''))
+        effective_desc = pick('description', tool.description_override, lib_entry.get('description', ''))
+    else:
+        # No library reference; use the legacy per-step fields
+        effective_command = pick('command', tool.command_override, tool.command)
+        effective_args = pick('args_template', tool.args_template_override, tool.args_template)
+        effective_update = pick('update_command', tool.update_command_override, tool.update_command)
+        effective_desc = pick('description', tool.description_override, tool.description)
+
+    return {
+        'command': effective_command,
+        'args_template': effective_args,
+        'update_command': effective_update,
+        'description': effective_desc,
+    }
+    return template
+
 def find_tool_by_id(workflow, tool_id):
     """Find tool in workflow by ID"""
     for tool in workflow.tools:
@@ -321,9 +386,11 @@ def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict
                  temp_dir: str, execution_context: Dict[str, Any]) -> ExecutionResult:
     """Execute a single tool with enhanced input/output handling"""
     logger.info(f"=== STARTING EXECUTION OF TOOL: {tool.name} (ID: {tool.id}) ===")
-    logger.info(f"Tool configuration:")
-    logger.info(f"  - Command: {tool.command}")
-    logger.info(f"  - Args template: {tool.args_template}")
+    settings = load_settings()
+    resolved = resolve_tool_from_library(tool, settings)
+    logger.info(f"Tool configuration (resolved):")
+    logger.info(f"  - Command/Path: {resolved['command']}")
+    logger.info(f"  - Default Command (args): {resolved['args_template']}")
     logger.info(f"  - Input source: {tool.input_source}")
     logger.info(f"  - Input method: {tool.input_method}")
     logger.info(f"  - Placeholder name: {tool.placeholder_name}")
@@ -480,10 +547,14 @@ def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict
                 logger.info(f"  {key}: {value}")
         
         # Parse arguments with context
-        args = parse_args_template(tool.args_template, context)
-        
+        # Inject global wordlists into context (usable as {wordlistName})
+        for wl_name, wl_path in (settings.get('wordlists', {}) or {}).items():
+            context[wl_name] = wl_path
+
+        args = parse_args_template(resolved['args_template'], context)
+
         # Build command
-        cmd = f"{tool.command} {args}".strip()
+        cmd = f"{resolved['command']} {args}".strip()
         logger.info(f"FINAL COMMAND TO EXECUTE: {cmd}")
         
         # Get timeout from settings
@@ -573,8 +644,10 @@ def execute_update_thread(tool: ToolConfig, workflow_id: str):
             result.error = "No update command configured"
             return
         
-        # Execute the update command
-        cmd = f"{tool.command} {tool.update_command}"
+        # Execute the update command.
+        # Convention: update_command is an argument string appended to the tool executable.
+        # (Kept as shell=True for backward compatibility with existing update commands.)
+        cmd = f"{tool.command} {tool.update_command}".strip()
         logger.info(f"Updating tool: {cmd}")
         
         # Get timeout from settings
@@ -597,14 +670,25 @@ def execute_update_thread(tool: ToolConfig, workflow_id: str):
         # Update the tool's last_updated timestamp
         if result.status == 'completed':
             tool.last_updated = datetime.now().isoformat()
-            # Save the workflow with updated timestamp
-            workflow = workflows_db.get(workflow_id)
-            if workflow:
-                # Find and update the tool in the workflow
-                for wf_tool in workflow.tools:
-                    if wf_tool.id == tool.id:
-                        wf_tool.last_updated = tool.last_updated
-                workflow.updated_at = datetime.now().isoformat()
+
+            # If this is a library tool update, persist last_updated back into settings.
+            if workflow_id == '__library__':
+                settings = load_settings()
+                lib = settings.get('tool_library', []) or []
+                for entry in lib:
+                    if entry.get('id') == tool.id:
+                        entry['last_updated'] = tool.last_updated
+                        break
+                save_settings(settings)
+            else:
+                # Save the workflow with updated timestamp
+                workflow = workflows_db.get(workflow_id)
+                if workflow:
+                    # Find and update the tool in the workflow
+                    for wf_tool in workflow.tools:
+                        if wf_tool.id == tool.id:
+                            wf_tool.last_updated = tool.last_updated
+                    workflow.updated_at = datetime.now().isoformat()
         
     except subprocess.TimeoutExpired:
         settings = load_settings()
@@ -789,7 +873,10 @@ def create_workflow():
     workflow_id = request.args.get('id')
     workflow = workflows_db.get(workflow_id)
     workflow_dict = workflow.to_dict() if workflow else None
-    return render_template('workflow_editor.html', workflow=workflow_dict)
+    app_settings = load_settings()
+    return render_template('workflow_editor.html', workflow=workflow_dict,
+                           tool_library=app_settings.get('tool_library', []),
+                           wordlists=app_settings.get('wordlists', {}))
 
 @app.route('/workflow/delete/<workflow_id>', methods=['POST'])
 def delete_workflow(workflow_id):
@@ -1118,6 +1205,31 @@ def update_settings():
                         if isinstance(value, str):
                             value = value.lower() in ['true', 'yes', '1', 'on']
                     
+
+                    if key == 'tool_library':
+                        # Accept list of tool definitions; if provided as JSON string, parse it
+                        if isinstance(value, str):
+                            try:
+                                value = json.loads(value)
+                            except Exception:
+                                logger.warning("Invalid JSON for tool_library; using existing value")
+                                value = current_settings.get('tool_library', DEFAULT_SETTINGS.get('tool_library', []))
+                        if not isinstance(value, list):
+                            logger.warning("tool_library must be a list; using existing value")
+                            value = current_settings.get('tool_library', DEFAULT_SETTINGS.get('tool_library', []))
+
+                    if key == 'wordlists':
+                        # Accept dict of {name: path}; if provided as JSON string, parse it
+                        if isinstance(value, str):
+                            try:
+                                value = json.loads(value)
+                            except Exception:
+                                logger.warning("Invalid JSON for wordlists; using existing value")
+                                value = current_settings.get('wordlists', DEFAULT_SETTINGS.get('wordlists', {}))
+                        if not isinstance(value, dict):
+                            logger.warning("wordlists must be a dict; using existing value")
+                            value = current_settings.get('wordlists', DEFAULT_SETTINGS.get('wordlists', {}))
+
                     current_settings[key] = value
                     updated_count += 1
                     logger.debug(f"Updated setting '{key}' to '{value}'")
@@ -1221,7 +1333,26 @@ def restore_settings():
 @app.route('/tools/update')
 def tools_update():
     """Tools update management page"""
+    settings = load_settings()
     all_tools = []
+
+    # 1) Tool Library tools (global)
+    for entry in (settings.get('tool_library', []) or []):
+        all_tools.append({
+            'id': entry.get('id'),
+            'name': entry.get('name', 'Unnamed'),
+            # Keep legacy key names expected by the template
+            'command': entry.get('path', entry.get('command', '')),
+            'args_template': entry.get('default_command', entry.get('args_template', '')),
+            'update_command': entry.get('update_command', ''),
+            'last_updated': entry.get('last_updated'),
+            'description': entry.get('description', ''),
+            'color': entry.get('color', '#4a86e8'),
+            'workflow_id': '__library__',
+            'workflow_name': 'Tool Library'
+        })
+
+    # 2) Workflow-defined tools (legacy)
     for workflow_id, workflow in workflows_db.items():
         for tool in workflow.tools:
             tool_dict = tool.to_dict()
@@ -1242,22 +1373,41 @@ def update_tool():
     data = request.json
     tool_id = data.get('tool_id')
     workflow_id = data.get('workflow_id')
-    
+
     if not tool_id or not workflow_id:
         return jsonify({'success': False, 'error': 'Missing tool_id or workflow_id'})
-    
-    workflow = workflows_db.get(workflow_id)
-    if not workflow:
-        return jsonify({'success': False, 'error': 'Workflow not found'})
-    
-    target_tool = None
-    for tool in workflow.tools:
-        if tool.id == tool_id:
-            target_tool = tool
-            break
-    
-    if not target_tool:
-        return jsonify({'success': False, 'error': 'Tool not found in workflow'})
+
+    # Tool Library update
+    if workflow_id == '__library__':
+        settings = load_settings()
+        entry = None
+        for t in (settings.get('tool_library', []) or []):
+            if t.get('id') == tool_id:
+                entry = t
+                break
+        if not entry:
+            return jsonify({'success': False, 'error': 'Tool not found in Tool Library'})
+
+        target_tool = ToolConfig(
+            tool_id=entry.get('id', str(uuid.uuid4())),
+            name=entry.get('name', 'Unnamed'),
+            command=entry.get('path', entry.get('command', '')),
+            args_template=entry.get('default_command', entry.get('args_template', '')),
+            update_command=entry.get('update_command', ''),
+            description=entry.get('description', ''),
+        )
+    else:
+        workflow = workflows_db.get(workflow_id)
+        if not workflow:
+            return jsonify({'success': False, 'error': 'Workflow not found'})
+
+        target_tool = None
+        for tool in workflow.tools:
+            if tool.id == tool_id:
+                target_tool = tool
+                break
+        if not target_tool:
+            return jsonify({'success': False, 'error': 'Tool not found in workflow'})
     
     if not target_tool.update_command:
         return jsonify({'success': False, 'error': 'No update command configured for this tool'})
@@ -1280,13 +1430,40 @@ def update_all_tools():
     
     tools_to_update = []
     
-    if workflow_id:
+    settings = load_settings()
+
+    if workflow_id == '__library__':
+        # Only library tools
+        for entry in (settings.get('tool_library', []) or []):
+            if entry.get('update_command'):
+                tools_to_update.append((ToolConfig(
+                    tool_id=entry.get('id', str(uuid.uuid4())),
+                    name=entry.get('name', 'Unnamed'),
+                    command=entry.get('path', entry.get('command', '')),
+                    args_template=entry.get('default_command', entry.get('args_template', '')),
+                    update_command=entry.get('update_command', ''),
+                    description=entry.get('description', ''),
+                ), '__library__'))
+    elif workflow_id:
+        # Only a specific workflow
         workflow = workflows_db.get(workflow_id)
         if workflow:
             for tool in workflow.tools:
                 if tool.update_command:
                     tools_to_update.append((tool, workflow_id))
     else:
+        # All tools: library + all workflows
+        for entry in (settings.get('tool_library', []) or []):
+            if entry.get('update_command'):
+                tools_to_update.append((ToolConfig(
+                    tool_id=entry.get('id', str(uuid.uuid4())),
+                    name=entry.get('name', 'Unnamed'),
+                    command=entry.get('path', entry.get('command', '')),
+                    args_template=entry.get('default_command', entry.get('args_template', '')),
+                    update_command=entry.get('update_command', ''),
+                    description=entry.get('description', ''),
+                ), '__library__'))
+
         for wf_id, workflow in workflows_db.items():
             for tool in workflow.tools:
                 if tool.update_command:

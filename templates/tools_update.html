@@ -69,7 +69,7 @@
                             </div>
                         </td>
                         <td>
-                            <code style="font-size: 12px;">{{ tool.command }}</code>
+                            <code style="font-size: 12px;">{{ tool.command }}{% if tool.args_template %} {{ tool.args_template }}{% endif %}</code>
                         </td>
                         <td>
                             {% if tool.update_command %}
@@ -101,10 +101,16 @@
                                     <i class="fas fa-sync"></i> Update
                                 </button>
                                 {% endif %}
+                                {% if tool.workflow_id == '__library__' %}
+                                <a href="{{ url_for('settings') }}" class="btn btn-secondary btn-sm">
+                                    <i class="fas fa-cog"></i> Settings
+                                </a>
+                                {% else %}
                                 <a href="{{ url_for('create_workflow', id=tool.workflow_id) }}" 
                                    class="btn btn-secondary btn-sm">
                                     <i class="fas fa-edit"></i> Edit
                                 </a>
+                                {% endif %}
                             </div>
                         </td>
                     </tr>
@@ -116,7 +122,7 @@
         <div class="text-center" style="padding: 40px;">
             <i class="fas fa-tools" style="font-size: 48px; color: var(--text-muted); margin-bottom: 20px;"></i>
             <h3 style="color: var(--text-muted);">No tools found</h3>
-            <p style="color: var(--text-muted);">Create a workflow with tools first</p>
+            <p style="color: var(--text-muted);">Create a workflow with tools first or create a tool on the Settings menu</p>
             <a href="{{ url_for('create_workflow') }}" class="btn btn-primary mt-20">
                 <i class="fas fa-plus"></i> Create Workflow
             </a>

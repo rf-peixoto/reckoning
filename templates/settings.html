@@ -116,14 +116,14 @@
                     <div class="form-group">
                         <label class="form-label">Max Execution Time (seconds)</label>
                         <input type="number" class="form-control" name="max_execution_time" 
-                               value="{{ settings.max_execution_time }}" min="7" max="9999">
+                               value="{{ settings.max_execution_time }}" min="7" max="99999">
                         <div class="form-text">Maximum time per tool execution</div>
                     </div>
                     
                     <div class="form-group">
                         <label class="form-label">Max Output Size (characters)</label>
                         <input type="number" class="form-control" name="max_output_size" 
-                               value="{{ settings.max_output_size }}" min="1000" max="1000000">
+                               value="{{ settings.max_output_size }}" min="1000" max="9999999">
                         <div class="form-text">Maximum output size to store per tool</div>
                     </div>
                     
@@ -197,26 +197,101 @@
     </div>
 </div>
 
+<!-- Tool Library and Wordlists configuration -->
+<div class="card mb-20">
+    <div class="card-header">
+        <h3 style="margin: 0; color: var(--accent);">
+            <i class="fas fa-toolbox"></i> Tool Library
+        </h3>
+        <div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">
+            Configure tools once. Workflows can then select a tool and optionally override fields per step.
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-10 mb-10" style="flex-wrap: wrap;">
+            <input id="tl_name" class="form-control" style="min-width: 160px; max-width: 240px;" placeholder="Name (e.g., ffuf)">
+            <input id="tl_path" class="form-control" style="min-width: 220px; flex: 1;" placeholder="Path (e.g., /usr/bin/ffuf)">
+            <input id="tl_default_cmd" class="form-control" style="min-width: 260px; flex: 2;" placeholder="Default Command (args template)">
+            <input id="tl_update_cmd" class="form-control" style="min-width: 220px; flex: 1;" placeholder="Update Command (args)">
+        </div>
+        <div class="mb-10">
+            <textarea id="tl_desc" class="form-control" rows="2" placeholder="Description"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="addToolLibraryItem()">
+            <i class="fas fa-plus"></i> Add Tool
+        </button>
+
+        <div class="mt-20" style="overflow-x: auto;">
+            <table class="table" style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Path</th>
+                        <th>Default Command</th>
+                        <th>Update Command</th>
+                        <th>Description</th>
+                        <th style="width: 90px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="toolLibraryTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header">
+        <h3 style="margin: 0; color: var(--accent);">
+            <i class="fas fa-list"></i> Wordlists
+        </h3>
+        <div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">
+            Define named wordlists once. Use them in tool commands/args as placeholders like <code>{wordlist1}</code>.
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-10 mb-10" style="flex-wrap: wrap;">
+            <input id="wl_name" class="form-control" style="min-width: 160px; max-width: 240px;" placeholder="Name (e.g., wordlist1)">
+            <input id="wl_path" class="form-control" style="min-width: 320px; flex: 1;" placeholder="Path (e.g., /path/to/wordlist.txt)">
+        </div>
+        <button class="btn btn-primary" onclick="addWordlist()">
+            <i class="fas fa-plus"></i> Add Wordlist
+        </button>
+
+        <div class="mt-20" style="overflow-x: auto;">
+            <table class="table" style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Path</th>
+                        <th style="width: 90px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="wordlistsTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 <div class="card mt-20">
     <div class="card-header">
         <div class="card-title">
-            <i class="fas fa-shield-alt"></i> Security & Compliance
+            <i class="fas fa-shield-alt"></i> Security Notes
         </div>
     </div>
     <div class="card-body">
         <div class="alert alert-info">
             <i class="fas fa-info-circle"></i>
-            <strong>Important:</strong> This tool is for authorized security testing only.
+            <strong>Important:</strong> This tool is for authorized security testing only. The authors are not responsible for malicious use.
         </div>
         
         <div class="form-group">
-            <label class="form-label">Compliance Notes</label>
+            <label class="form-label">User Notes</label>
             <textarea class="form-control" rows="3" placeholder="Add compliance notes or authorization details..."></textarea>
             <div class="form-text">These notes will be included in all execution logs</div>
         </div>
         
         <button onclick="showComplianceInfo()" class="btn btn-primary">
-            <i class="fas fa-file-contract"></i> View Compliance Guidelines
+            <i class="fas fa-file-contract"></i> Terms of Use
         </button>
     </div>
 </div>
@@ -285,15 +360,10 @@
     
     function showComplianceInfo() {
         const complianceInfo = `
-        <h4>Compliance Guidelines</h4>
+        <h4>Terms of Use</h4>
         <ul>
-            <li>Only test systems you own or have explicit written permission to test</li>
-            <li>Respect all applicable laws and regulations</li>
-            <li>Do not test production systems without authorization</li>
-            <li>Keep all test results confidential and secure</li>
-            <li>Report any accidental access to unauthorized systems immediately</li>
-            <li>Maintain detailed logs of all testing activities</li>
-            <li>Follow responsible disclosure practices for any findings</li>
+            <li>You (the user) are responsible for your use of the platform. We do not collect your data, not even telemetry. Reckoning's target audience is researchers. Perform only in a protected environment and not in a publicly exposed location.</li>
+            <li>Feel free to report bugs and/or request features on Github.</li>
         </ul>
         `;
         
@@ -322,6 +392,140 @@
             return false;
         }
         return true;
+    });
+
+    // --- Tool library + Wordlists ---
+    let TOOL_LIBRARY = {{ (settings.tool_library or []) | tojson }};
+    let WORDLISTS = {{ (settings.wordlists or {}) | tojson }};
+
+    function renderToolLibrary() {
+        const tbody = document.getElementById('toolLibraryTable');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        TOOL_LIBRARY.forEach((t, idx) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${escapeHtml(t.name || '')}</td>
+                <td><code>${escapeHtml(t.path || '')}</code></td>
+                <td><code>${escapeHtml(t.default_command || '')}</code></td>
+                <td><code>${escapeHtml(t.update_command || '')}</code></td>
+                <td>${escapeHtml(t.description || '')}</td>
+                <td>
+                    <button class="btn btn-danger btn-sm" onclick="removeToolLibraryItem(${idx})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderWordlists() {
+        const tbody = document.getElementById('wordlistsTable');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        Object.keys(WORDLISTS).sort().forEach((name) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><code>${escapeHtml(name)}</code></td>
+                <td><code>${escapeHtml(WORDLISTS[name] || '')}</code></td>
+                <td>
+                    <button class="btn btn-danger btn-sm" onclick="removeWordlist('${name.replace(/'/g, "\'")}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function addToolLibraryItem() {
+        const name = (document.getElementById('tl_name').value || '').trim();
+        const path = (document.getElementById('tl_path').value || '').trim();
+        const defCmd = (document.getElementById('tl_default_cmd').value || '').trim();
+        const updCmd = (document.getElementById('tl_update_cmd').value || '').trim();
+        const desc = (document.getElementById('tl_desc').value || '').trim();
+
+        if (!name || !path) {
+            alert('Tool Name and Path are required.');
+            return;
+        }
+
+        const id = 'tl_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+        TOOL_LIBRARY.push({
+            id: id,
+            name: name,
+            path: path,
+            default_command: defCmd,
+            update_command: updCmd,
+            description: desc
+        });
+
+        document.getElementById('tl_name').value = '';
+        document.getElementById('tl_path').value = '';
+        document.getElementById('tl_default_cmd').value = '';
+        document.getElementById('tl_update_cmd').value = '';
+        document.getElementById('tl_desc').value = '';
+
+        renderToolLibrary();
+        saveExtraSettings();
+    }
+
+    function removeToolLibraryItem(idx) {
+        TOOL_LIBRARY.splice(idx, 1);
+        renderToolLibrary();
+        saveExtraSettings();
+    }
+
+    function addWordlist() {
+        const name = (document.getElementById('wl_name').value || '').trim();
+        const path = (document.getElementById('wl_path').value || '').trim();
+        if (!name || !path) {
+            alert('Wordlist Name and Path are required.');
+            return;
+        }
+        WORDLISTS[name] = path;
+        document.getElementById('wl_name').value = '';
+        document.getElementById('wl_path').value = '';
+        renderWordlists();
+        saveExtraSettings();
+    }
+
+    function removeWordlist(name) {
+        delete WORDLISTS[name];
+        renderWordlists();
+        saveExtraSettings();
+    }
+
+    function saveExtraSettings() {
+        // Merge with current settings already displayed on page by submitting only the new keys
+        fetch('{{ url_for("update_settings") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool_library: TOOL_LIBRARY,
+                wordlists: WORDLISTS
+            })
+        }).then(r => r.json()).then((data) => {
+            if (!data.success) {
+                console.error(data);
+                alert('Failed to save tool library/wordlists: ' + (data.error || 'unknown error'));
+            }
+        }).catch((e) => {
+            console.error(e);
+            alert('Failed to save tool library/wordlists.');
+        });
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        renderToolLibrary();
+        renderWordlists();
     });
 </script>
 {% endblock %}
