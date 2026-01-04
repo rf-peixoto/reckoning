@@ -1252,9 +1252,27 @@ def update_settings():
     
     return jsonify({'success': False, 'error': 'Invalid request'})
 
-@app.route('/settings/backup', methods=['POST'])
+@app.route('/settings/backup', methods=['GET','POST'])
 def backup_settings():
     """Create a backup of all data"""
+    # Download an existing backup (GET /settings/backup?download=<filename>)
+    if request.method == 'GET':
+        filename = request.args.get('download') if request.args else None
+        if not filename:
+            return redirect(url_for('settings'))
+        # Basic filename validation to avoid path traversal
+        if '/' in filename or '\\' in filename or not filename.endswith('.json'):
+            return jsonify({'success': False, 'error': 'Invalid filename'}), 400
+        backups_dir = os.path.join(os.getcwd(), 'backups')
+        filepath = os.path.join(backups_dir, filename)
+        if not os.path.exists(filepath):
+            return jsonify({'success': False, 'error': 'Backup not found'}), 404
+        return send_file(filepath, as_attachment=True, download_name=filename)
+
+    # POST: create a new backup
+    backups_dir = os.path.join(os.getcwd(), 'backups')
+    os.makedirs(backups_dir, exist_ok=True)
+
     backup_data = {
         'workflows': [w.to_dict() for w in workflows_db.values()],
         'executions': [e.to_dict() for e in execution_history.values()],
@@ -1264,7 +1282,7 @@ def backup_settings():
     }
     
     filename = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    filepath = os.path.join('backups', filename)
+    filepath = os.path.join(backups_dir, filename)
     
     with open(filepath, 'w') as f:
         json.dump(backup_data, f, indent=2)
