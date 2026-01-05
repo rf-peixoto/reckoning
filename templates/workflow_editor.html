@@ -196,6 +196,17 @@
 <script>
     const TOOL_LIBRARY = {{ (tool_library or []) | tojson }};
 
+    function buildToolLibraryOptions(selectedId) {
+        const sel = selectedId || '';
+        let html = '<option value="">Custom (manual)</option>';
+        for (const t of TOOL_LIBRARY) {
+            const selected = (t.id === sel) ? ' selected' : '';
+            const name = (t.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            html += `<option value="${t.id}"${selected}>${name}</option>`;
+        }
+        return html;
+    }
+
     let toolCounter = {{ workflow.tools|length if workflow else 0 }};
     const colors = ['#4a86e8', '#5cb85c', '#f0ad4e', '#d9534f', '#5bc0de'];
     // Tool color is the primary visual cue; avoid generating per-step icons.
@@ -232,8 +243,13 @@
                     <div class="card-body">
                         <div class="d-flex gap-20" style="flex-wrap: wrap;">
                             <div style="flex: 1; min-width: 250px;">
-                                        {# NOTE: The JS-only Tool Library select is rendered when adding tools dynamically.
-                                           For existing tools, we render options via Jinja2 below. #}
+                                <div class="form-group">
+                                    <label class="form-label">Tool Library</label>
+                                    <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
+                                        ${buildToolLibraryOptions('')}
+                                    </select>
+                                    <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
+                                </div>
                                 <div class="form-group">
                                     <label class="form-label">Command/Path</label>
                                     <input type="text" class="form-control tool-command" placeholder="e.g., assetfinder, /usr/bin/nuclei">

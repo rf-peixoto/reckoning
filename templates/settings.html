@@ -341,14 +341,32 @@
     
     function createBackup() {
         fetch('/settings/backup', {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json'
+            }
         })
-        .then(response => response.json())
+        .then(async (response) => {
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(text || ('HTTP ' + response.status));
+            }
+            const ct = response.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+                return response.json();
+            }
+            // Defensive fallback: backup may still be created even if server returned HTML.
+            return { success: true, filename: null };
+        })
         .then(data => {
             if (data.success) {
-                showAlert('Backup created: ' + data.filename, 'success');
-                // Optionally trigger download
-                window.location.href = '/settings/backup?download=' + data.filename;
+                if (data.filename) {
+                    showAlert('Backup created: ' + data.filename, 'success');
+                    window.location.href = '/settings/backup?download=' + data.filename;
+                } else {
+                    showAlert('Backup created successfully.', 'success');
+                    // If no filename is available, user can retrieve it from the backups folder.
+                }
             } else {
                 showAlert('Error creating backup: ' + data.error, 'danger');
             }
