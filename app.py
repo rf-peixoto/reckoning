@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file, send_from_directory
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file, send_from_directory, flash
 import os, json, uuid, subprocess, threading, time, re, tempfile, shutil, csv, hashlib
 from datetime import datetime
 import logging
@@ -9,6 +9,17 @@ app = Flask(__name__, static_folder='.')
 app.secret_key = os.urandom(24)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+
+def wants_json_response():
+    """Return True if this request expects a JSON response (AJAX/API)."""
+    if request.is_json:
+        return True
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return True
+    accept = (request.headers.get('Accept') or '').lower()
+    return 'application/json' in accept
+
 
 # Ensure directories exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -878,13 +889,21 @@ def create_workflow():
                            tool_library=app_settings.get('tool_library', []),
                            wordlists=app_settings.get('wordlists', {}))
 
+
 @app.route('/workflow/delete/<workflow_id>', methods=['POST'])
 def delete_workflow(workflow_id):
-    """Delete a workflow"""
+    """Delete a workflow."""
     if workflow_id in workflows_db:
         del workflows_db[workflow_id]
-        return jsonify({'success': True})
-    return jsonify({'success': False, 'error': 'Workflow not found'})
+        if wants_json_response():
+            return jsonify({'success': True})
+        flash('Workflow deleted.', 'success')
+        return redirect(url_for('index'))
+
+    if wants_json_response():
+        return jsonify({'success': False, 'error': 'Workflow not found'}), 404
+    flash('Workflow not found.', 'error')
+    return redirect(url_for('index'))
 
 @app.route('/execute', methods=['POST'])
 def execute_workflow():
@@ -1052,41 +1071,51 @@ def export_workflow(workflow_id):
     
     return jsonify(workflow.to_dict())
 
+
 @app.route('/workflow/import', methods=['POST'])
 def import_workflow():
-    """Import workflow from JSON"""
+    """Import workflow from JSON."""
     if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'})
-    
+        if wants_json_response():
+            return jsonify({'success': False, 'error': 'No file uploaded'})
+        flash('No file uploaded.', 'error')
+        return redirect(url_for('create_workflow'))
+
     file = request.files['file']
     if file.filename == '':
-        return jsonify({'success': False, 'error': 'No file selected'})
-    
+        if wants_json_response():
+            return jsonify({'success': False, 'error': 'No file selected'})
+        flash('No file selected.', 'error')
+        return redirect(url_for('create_workflow'))
+
     try:
         data = json.load(file)
-        workflow_id = data.get('id', str(uuid.uuid4()))
-        
-        # Reconstruct workflow from imported data
         tools = []
         for tool_data in data.get('tools', []):
             tools.append(ToolConfig.from_dict(tool_data))
-        
+
         workflow = Workflow(
-            workflow_id=workflow_id,
-            name=data['name'],
-            description=data['description'],
+            workflow_id=str(uuid.uuid4()),
+            name=data.get('name', 'Imported Workflow'),
+            description=data.get('description', ''),
             tools=tools,
-            created_at=data.get('created_at', datetime.now().isoformat()),
+            created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat()
         )
-        
-        workflows_db[workflow_id] = workflow
-        return jsonify({'success': True, 'workflow_id': workflow_id})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        workflows_db[workflow.id] = workflow
 
-# Executions Routes
+        if wants_json_response():
+            return jsonify({'success': True, 'workflow': workflow.to_dict()})
+
+        flash('Workflow imported successfully.', 'success')
+        return redirect(url_for('create_workflow', id=workflow.id))
+
+    except Exception as e:
+        if wants_json_response():
+            return jsonify({'success': False, 'error': str(e)})
+        flash(f'Failed to import workflow: {e}', 'error')
+        return redirect(url_for('create_workflow'))
+
 @app.route('/executions')
 def executions_list():
     """List all executions"""
@@ -1098,6 +1127,42 @@ def executions_list():
         workflow = workflows_db.get(execution.workflow_id)
         exec_dict['workflow_name'] = workflow.name if workflow else "Unknown Workflow"
         exec_dict['workflow_description'] = workflow.description if workflow else ""
+
+        # Compute duration for completed executions (avoid doing this in templates)
+        def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
+            if not ts:
+                return None
+            try:
+                return datetime.fromisoformat(ts)
+            except Exception:
+                # Best-effort: strip timezone/Z if present
+                try:
+                    return datetime.fromisoformat(ts.replace('Z', '').split('+')[0])
+                except Exception:
+                    return None
+
+        def _human_duration(seconds: Optional[int]) -> str:
+            if seconds is None:
+                return "--"
+            if seconds < 0:
+                seconds = 0
+            h = seconds // 3600
+            m = (seconds % 3600) // 60
+            s = seconds % 60
+            if h > 0:
+                return f"{h}h {m}m {s}s"
+            if m > 0:
+                return f"{m}m {s}s"
+            return f"{s}s"
+
+        start_dt = _parse_iso(exec_dict.get('started_at'))
+        end_dt = _parse_iso(exec_dict.get('completed_at'))
+        if start_dt and end_dt:
+            duration_seconds = int((end_dt - start_dt).total_seconds())
+        else:
+            duration_seconds = None
+        exec_dict['duration_seconds'] = duration_seconds
+        exec_dict['duration_human'] = _human_duration(duration_seconds)
         
         # Calculate summary statistics
         total_tools = len(workflow.tools) if workflow else 0
@@ -1252,27 +1317,27 @@ def update_settings():
     
     return jsonify({'success': False, 'error': 'Invalid request'})
 
-@app.route('/settings/backup', methods=['GET','POST'])
+
+@app.route('/settings/backup', methods=['GET', 'POST'])
 def backup_settings():
-    """Create a backup of all data"""
-    # Download an existing backup (GET /settings/backup?download=<filename>)
+    """Create a backup (POST) or download a backup file (GET)."""
+    os.makedirs('backups', exist_ok=True)
+
+    # Download existing backup
+    download_name = request.args.get('download')
     if request.method == 'GET':
-        filename = request.args.get('download') if request.args else None
-        if not filename:
-            return redirect(url_for('settings'))
-        # Basic filename validation to avoid path traversal
-        if '/' in filename or '\\' in filename or not filename.endswith('.json'):
-            return jsonify({'success': False, 'error': 'Invalid filename'}), 400
-        backups_dir = os.path.join(os.getcwd(), 'backups')
-        filepath = os.path.join(backups_dir, filename)
+        if not download_name:
+            # The UI should trigger POST to create; GET without download is not supported.
+            return jsonify({'success': False, 'error': 'Missing download parameter'}), 400
+
+        safe_name = os.path.basename(download_name)
+        filepath = os.path.join('backups', safe_name)
         if not os.path.exists(filepath):
-            return jsonify({'success': False, 'error': 'Backup not found'}), 404
-        return send_file(filepath, as_attachment=True, download_name=filename)
+            return jsonify({'success': False, 'error': 'Backup file not found'}), 404
 
-    # POST: create a new backup
-    backups_dir = os.path.join(os.getcwd(), 'backups')
-    os.makedirs(backups_dir, exist_ok=True)
+        return send_file(filepath, as_attachment=True, download_name=safe_name)
 
+    # Create new backup
     backup_data = {
         'workflows': [w.to_dict() for w in workflows_db.values()],
         'executions': [e.to_dict() for e in execution_history.values()],
@@ -1280,74 +1345,127 @@ def backup_settings():
         'backup_date': datetime.now().isoformat(),
         'version': '1.0.0'
     }
-    
+
     filename = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    filepath = os.path.join(backups_dir, filename)
-    
+    filepath = os.path.join('backups', filename)
+
     with open(filepath, 'w') as f:
         json.dump(backup_data, f, indent=2)
-    
-    return jsonify({
-        'success': True,
-        'message': f'Backup created: {filename}',
-        'filename': filename
-    })
+
+    # If called from a browser form, redirect to download
+    if not wants_json_response():
+        flash('Backup created successfully.', 'success')
+        return redirect(url_for('backup_settings') + f"?download={filename}")
+
+    return jsonify({'success': True, 'filename': filename})
+
 
 @app.route('/settings/restore', methods=['POST'])
 def restore_settings():
-    """Restore from backup"""
+    """Restore from backup.
+
+    For browser form submissions, redirect back to Settings with a flash message.
+    For AJAX/API calls, return JSON.
+    """
     if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'})
-    
+        if wants_json_response():
+            return jsonify({'success': False, 'error': 'No file uploaded'})
+        flash('No file uploaded.', 'error')
+        return redirect(url_for('settings'))
+
     file = request.files['file']
     if file.filename == '':
-        return jsonify({'success': False, 'error': 'No file selected'})
-    
+        if wants_json_response():
+            return jsonify({'success': False, 'error': 'No file selected'})
+        flash('No file selected.', 'error')
+        return redirect(url_for('settings'))
+
     try:
         data = json.load(file)
-        
+
+        # Restore settings (Tool Library / Wordlists, etc.)
+        # Backup schema stores settings under top-level key 'settings'.
+        backup_settings = data.get('settings', {})
+        if isinstance(backup_settings, dict) and backup_settings:
+            current_settings = load_settings()
+            # Merge: prefer backup values when present.
+            for k in DEFAULT_SETTINGS.keys():
+                if k in backup_settings:
+                    current_settings[k] = backup_settings[k]
+            save_settings(current_settings)
+
         workflows_db.clear()
         execution_history.clear()
-        
+
         # Restore workflows
         for workflow_data in data.get('workflows', []):
             tools = []
             for tool_data in workflow_data.get('tools', []):
                 tools.append(ToolConfig.from_dict(tool_data))
-            
+
             workflow = Workflow(
                 workflow_id=workflow_data.get('id', str(uuid.uuid4())),
                 name=workflow_data['name'],
-                description=workflow_data['description'],
+                description=workflow_data.get('description', ''),
                 tools=tools,
                 created_at=workflow_data.get('created_at', datetime.now().isoformat()),
                 updated_at=datetime.now().isoformat()
             )
             workflows_db[workflow.id] = workflow
-        
+
         # Restore executions if requested
+        # IMPORTANT: this must be a data import only. Never restart/resume executions.
         restore_executions = request.form.get('restore_executions', 'false').lower() == 'true'
         if restore_executions:
             for exec_data in data.get('executions', []):
+                restored_status = exec_data.get('status', 'completed')
+                # If the backup contains in-flight states, mark as restored to avoid any future "resume" logic.
+                if restored_status in ('queued', 'running'):
+                    restored_status = 'restored'
+
+                results = {}
+                for k, v in (exec_data.get('results') or {}).items():
+                    try:
+                        results[k] = ExecutionResult(
+                            tool_id=v.get('tool_id', k),
+                            tool_name=v.get('tool_name', ''),
+                            status=v.get('status', 'completed'),
+                            start_time=v.get('start_time'),
+                            end_time=v.get('end_time'),
+                            output=v.get('output'),
+                            error=v.get('error'),
+                            exit_code=v.get('exit_code')
+                        )
+                    except Exception:
+                        continue
+
                 execution = WorkflowExecution(
                     execution_id=exec_data.get('execution_id', str(uuid.uuid4())),
-                    workflow_id=exec_data['workflow_id'],
-                    domain=exec_data['domain'],
-                    status=exec_data['status'],
-                    created_at=exec_data.get('created_at')
+                    workflow_id=exec_data.get('workflow_id'),
+                    domain=exec_data.get('domain', ''),
+                    status=restored_status,
+                    results=results,
+                    created_at=exec_data.get('created_at'),
+                    started_at=exec_data.get('started_at'),
+                    completed_at=exec_data.get('completed_at'),
+                    version=exec_data.get('version', 0),
+                    last_updated_at=exec_data.get('last_updated_at'),
+                    events=exec_data.get('events', [])
                 )
                 execution_history[execution.execution_id] = execution
-        
-        # Restore settings if present
-        if 'settings' in data:
-            save_settings(data['settings'])
-        
-        return jsonify({'success': True, 'message': 'Backup restored successfully'})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
 
-# Tool Update Routes
+        if not wants_json_response():
+            flash('Backup restored successfully.', 'success')
+            return redirect(url_for('index'))
+
+        return jsonify({'success': True, 'message': 'Backup restored successfully'})
+
+    except Exception as e:
+        if wants_json_response():
+            return jsonify({'success': False, 'error': str(e)})
+        flash(f'Failed to restore backup: {e}', 'error')
+        return redirect(url_for('settings'))
+
 @app.route('/tools/update')
 def tools_update():
     """Tools update management page"""

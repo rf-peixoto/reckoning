@@ -299,19 +299,7 @@
             position: relative;
             z-index: 2;
         }
-        
-        .tool-icon {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            color: white;
-            flex-shrink: 0;
-        }
-        
+                
         .tool-content {
             flex: 1;
         }
@@ -511,7 +499,20 @@
     </header>
     
     <main class="container" style="padding: 30px 0;">
-        {% block content %}{% endblock %}
+        
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="container" style="margin-top: 15px;">
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }}" style="margin-bottom: 10px;">
+          {{ message }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+{% block content %}{% endblock %}
     </main>
     
     <footer style="background: var(--secondary); padding: 20px 0; margin-top: 40px; border-top: 1px solid var(--border-light);">

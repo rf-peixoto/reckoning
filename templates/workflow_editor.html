@@ -47,10 +47,7 @@
         <div id="toolChain" class="tool-chain">
             {% if workflow and workflow.tools %}
                 {% for tool in workflow.tools %}
-                <div class="tool-node" data-tool-id="{{ tool.id }}">
-                    <div class="tool-icon" style="background: {{ tool.color }};">
-                        <i class="fas fa-{{ 'terminal' if not loop.index0 else 'search' if loop.index0 == 1 else 'filter' if loop.index0 == 2 else 'folder' }}"></i>
-                    </div>
+                <div class="tool-node" data-tool-id="{{ tool.id }}" style="border-left: 6px solid {{ tool.color }};">
                     <div class="tool-content">
                         <div class="card" style="margin-bottom: 0;">
                             <div class="card-header d-flex justify-between align-center">
@@ -82,14 +79,10 @@
                                         <div class="form-group">
                                             <label class="form-label">Tool Library</label>
                                             <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
-                                                <option value="">Custom (manual)</option></select>
-                                            <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="form-label">Tool Library</label>
-                                            <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
                                                 <option value="">Custom (manual)</option>
-                                                ${TOOL_LIBRARY.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
+                                                {% for t in tool_library %}
+                                                    <option value="{{ t.id }}" {% if tool.library_tool_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+                                                {% endfor %}
                                             </select>
                                             <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
                                         </div>
@@ -205,19 +198,15 @@
 
     let toolCounter = {{ workflow.tools|length if workflow else 0 }};
     const colors = ['#4a86e8', '#5cb85c', '#f0ad4e', '#d9534f', '#5bc0de'];
-    const icons = ['terminal', 'search', 'filter', 'folder', 'eye', 'bug', 'shield-alt', 'network-wired'];
+    // Tool color is the primary visual cue; avoid generating per-step icons.
     
     function addTool() {
         toolCounter++;
         const toolId = 'tool_' + Date.now();
         const color = colors[toolCounter % colors.length];
-        const icon = icons[toolCounter % icons.length];
         
         const toolHtml = `
-        <div class="tool-node" data-tool-id="${toolId}">
-            <div class="tool-icon" style="background: ${color};">
-                <i class="fas fa-${icon}"></i>
-            </div>
+        <div class="tool-node" data-tool-id="${toolId}" style="border-left: 6px solid ${color};">
             <div class="tool-content">
                 <div class="card" style="margin-bottom: 0;">
                     <div class="card-header d-flex justify-between align-center">
@@ -243,22 +232,10 @@
                     <div class="card-body">
                         <div class="d-flex gap-20" style="flex-wrap: wrap;">
                             <div style="flex: 1; min-width: 250px;">
+                                        {# NOTE: The JS-only Tool Library select is rendered when adding tools dynamically.
+                                           For existing tools, we render options via Jinja2 below. #}
                                 <div class="form-group">
-                                    <label class="form-label">Tool Library</label>
-                                            <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
-                                                <option value="">Custom (manual)</option></select>
-                                            <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="form-label">Tool Library</label>
-                                            <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
-                                                <option value="">Custom (manual)</option>
-                                                ${TOOL_LIBRARY.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
-                                            </select>
-                                            <div class="form-text">Select a configured tool to preload Path/Default Command, then customize if needed.</div>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="form-label">Command/Path</label>
+                                    <label class="form-label">Command/Path</label>
                                     <input type="text" class="form-control tool-command" placeholder="e.g., assetfinder, /usr/bin/nuclei">
                                 </div>
                                 <div class="form-group">
@@ -362,9 +339,9 @@ function updateToolName(input, toolId) {
     }
     
     function updateToolColor(select, toolId) {
-        const icon = document.querySelector(`[data-tool-id="${toolId}"] .tool-icon`);
-        if (icon) {
-            icon.style.backgroundColor = select.value;
+        const node = document.querySelector(`[data-tool-id="${toolId}"]`);
+        if (node) {
+            node.style.borderLeftColor = select.value;
         }
     }
     
@@ -413,7 +390,7 @@ function updateToolName(input, toolId) {
                 }
             }
             const updateCommand = node.querySelector('.tool-update-command').value;
-            const color = node.querySelector('.tool-icon').style.backgroundColor;
+            const color = (node.style.borderLeftColor || window.getComputedStyle(node).borderLeftColor || '#4a86e8');
             const enabled = node.querySelector('input[type="checkbox"]').checked;
             
             tools.push({
@@ -484,7 +461,7 @@ function updateToolName(input, toolId) {
                 parseInt(node.querySelector('.tool-specific-step input').value) : null;
             const description = node.querySelector('.tool-description').value;
             const updateCommand = node.querySelector('.tool-update-command').value;
-            const color = node.querySelector('.tool-icon').style.backgroundColor;
+            const color = (node.style.borderLeftColor || window.getComputedStyle(node).borderLeftColor || '#4a86e8');
             const enabled = node.querySelector('input[type="checkbox"]').checked;
             
             tools.push({

@@ -96,18 +96,7 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if exec.started_at and exec.completed_at %}
-                                {% set start = exec.started_at %}
-                                {% set end = exec.completed_at %}
-                                {% set diff = (end|string|length > 0 and start|string|length > 0) %}
-                                {% if diff %}
-                                    {{ ((end|string)[:19]|length - (start|string)[:19]|length)|abs }}s
-                                {% else %}
-                                    --
-                                {% endif %}
-                            {% else %}
-                                --
-                            {% endif %}
+                            {{ exec.duration_human or '--' }}
                         </td>
                         <td>
                             <div class="d-flex gap-10">
