@@ -715,7 +715,13 @@ def execute_update_thread(tool: ToolConfig, workflow_id: str):
 
 def run_workflow_thread(execution: WorkflowExecution):
     """Background thread to execute workflow with enhanced data flow"""
-    temp_dir = tempfile.mkdtemp(prefix="workflow_")
+    app_settings = load_settings()
+    base_temp = (app_settings.get("temp_directory") or "").strip()
+    if base_temp:
+        os.makedirs(base_temp, exist_ok=True)
+        temp_dir = tempfile.mkdtemp(prefix="workflow_", dir=base_temp)
+    else:
+        temp_dir = tempfile.mkdtemp(prefix="workflow_")
     previous_outputs = {}  # Store outputs by tool ID
     
     try:
@@ -802,9 +808,13 @@ def run_workflow_thread(execution: WorkflowExecution):
         logger.error(f"Traceback: {traceback.format_exc()}")
     finally:
         execution.completed_at = datetime.now().isoformat()
-        # Clean up temp directory
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        logger.info(f"Cleaned up temp directory: {temp_dir}")
+        # Clean up temp directory if enabled
+        try:
+            if app_settings.get('auto_cleanup', True):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logger.info(f"Cleaned up temp directory: {temp_dir}")
+        except Exception as e:
+            logger.warning(f"Temp cleanup failed for {temp_dir}: {e}")
 
 # Settings Management Functions
 def load_settings():
@@ -971,7 +981,8 @@ def execution_status(execution_id):
 
     return render_template('execution_detail.html',
                            execution=execution_dict,
-                           tool_order=tool_order)
+                           tool_order=tool_order,
+                           settings=load_settings())
 
 @app.route('/execution/<execution_id>/status')
 @app.route('/api/execution/<execution_id>/status')
@@ -1249,6 +1260,10 @@ def update_settings():
     if request.method == 'POST':
         try:
             data = request.json
+            # Backward/forward compatibility: accept 'notifications' as alias for 'enable_notifications'
+            if isinstance(data, dict) and 'notifications' in data and 'enable_notifications' not in data:
+                data['enable_notifications'] = data.pop('notifications')
+
             logger.info(f"Received settings update request")
             
             # Load current settings
