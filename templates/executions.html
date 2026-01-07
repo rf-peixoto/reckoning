@@ -100,6 +100,14 @@
                         </td>
                         <td>
                             <div class="d-flex gap-10">
+                                {% if exec.status in ['queued', 'running', 'cancelling'] %}
+                                <form action="{{ url_for('cancel_execution', execution_id=exec.execution_id) }}"
+                                      method="POST" style="display: inline;">
+                                    <button type="submit" class="btn btn-warning btn-sm" title="Cancel execution">
+                                        <i class="fas fa-stop"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
                                 <a href="{{ url_for('execution_status', execution_id=exec.execution_id) }}" 
                                    class="btn btn-primary btn-sm">
                                     <i class="fas fa-eye"></i> View

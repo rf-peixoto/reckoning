@@ -7,6 +7,11 @@
     <i class="fas fa-play-circle"></i> Execution Details
   </h2>
   <div class="d-flex gap-10">
+    <form id="cancelForm" action="{{ url_for('cancel_execution', execution_id=execution.execution_id) }}" method="POST" style="display: {{ 'inline' if execution.status in ['queued','running','cancelling'] else 'none' }};">
+      <button type="submit" class="btn btn-warning" id="cancelBtn">
+        <i class="fas fa-stop"></i> Cancel
+      </button>
+    </form>
     <a href="{{ url_for('executions_list') }}" class="btn btn-secondary">
       <i class="fas fa-history"></i> History
     </a>
@@ -154,12 +159,22 @@
     text.textContent = status;
 
     let color = "var(--text-muted)";
+    if (status === "queued") color = "var(--info)";
     if (status === "running") color = "var(--warning)";
+    if (status === "cancelling") color = "var(--warning)";
+    if (status === "cancelled") color = "var(--info)";
     if (status === "completed") color = "var(--success)";
     if (status === "failed") color = "var(--danger)";
 
     badge.style.color = color;
     badge.style.borderColor = "var(--border)";
+
+    // Show/hide Cancel button depending on state.
+    const cancelForm = document.getElementById("cancelForm");
+    if (cancelForm) {
+      const show = (status === "queued" || status === "running" || status === "cancelling");
+      cancelForm.style.display = show ? "inline" : "none";
+    }
   }
 
   function setToolStatus(toolId, status) {
@@ -172,6 +187,7 @@
     if (status === "running") color = "var(--warning)";
     if (status === "completed") color = "var(--success)";
     if (status === "failed") color = "var(--danger)";
+    if (status === "cancelled") color = "var(--info)";
     if (status === "skipped") color = "var(--text-muted)";
 
     el.style.color = color;

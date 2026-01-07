@@ -217,9 +217,14 @@
         <div class="mb-10">
             <textarea id="tl_desc" class="form-control" rows="2" placeholder="Description"></textarea>
         </div>
-        <button class="btn btn-primary" onclick="addToolLibraryItem()">
-            <i class="fas fa-plus"></i> Add Tool
-        </button>
+        <div class="d-flex gap-10" style="flex-wrap: wrap;">
+            <button id="tl_submit_btn" class="btn btn-primary" onclick="addToolLibraryItem()">
+                <i id="tl_submit_icon" class="fas fa-plus"></i> <span id="tl_submit_text">Add Tool</span>
+            </button>
+            <button id="tl_cancel_btn" class="btn btn-secondary" style="display: none;" onclick="cancelEditToolLibraryItem()">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
 
         <div class="mt-20" style="overflow-x: auto;">
             <table class="table" style="width: 100%;">
@@ -230,7 +235,7 @@
                         <th>Default Command</th>
                         <th>Update Command</th>
                         <th>Description</th>
-                        <th style="width: 90px;"></th>
+                        <th style="width: 140px;"></th>
                     </tr>
                 </thead>
                 <tbody id="toolLibraryTable"></tbody>
@@ -253,9 +258,14 @@
             <input id="wl_name" class="form-control" style="min-width: 160px; max-width: 240px;" placeholder="Name (e.g., wordlist1)">
             <input id="wl_path" class="form-control" style="min-width: 320px; flex: 1;" placeholder="Path (e.g., /path/to/wordlist.txt)">
         </div>
-        <button class="btn btn-primary" onclick="addWordlist()">
-            <i class="fas fa-plus"></i> Add Wordlist
-        </button>
+        <div class="d-flex gap-10" style="flex-wrap: wrap;">
+            <button id="wl_submit_btn" class="btn btn-primary" onclick="addWordlist()">
+                <i id="wl_submit_icon" class="fas fa-plus"></i> <span id="wl_submit_text">Add Wordlist</span>
+            </button>
+            <button id="wl_cancel_btn" class="btn btn-secondary" style="display: none;" onclick="cancelEditWordlist()">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
 
         <div class="mt-20" style="overflow-x: auto;">
             <table class="table" style="width: 100%;">
@@ -263,7 +273,7 @@
                     <tr>
                         <th>Name</th>
                         <th>Path</th>
-                        <th style="width: 90px;"></th>
+                        <th style="width: 140px;"></th>
                     </tr>
                 </thead>
                 <tbody id="wordlistsTable"></tbody>
@@ -416,6 +426,10 @@
     let TOOL_LIBRARY = {{ (settings.tool_library or []) | tojson }};
     let WORDLISTS = {{ (settings.wordlists or {}) | tojson }};
 
+    // Edit state
+    let EDIT_TL_INDEX = null;
+    let EDIT_WL_NAME = null;
+
     function renderToolLibrary() {
         const tbody = document.getElementById('toolLibraryTable');
         if (!tbody) return;
@@ -429,9 +443,14 @@
                 <td><code>${escapeHtml(t.update_command || '')}</code></td>
                 <td>${escapeHtml(t.description || '')}</td>
                 <td>
-                    <button class="btn btn-danger btn-sm" onclick="removeToolLibraryItem(${idx})">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    <div class="d-flex gap-10">
+                        <button class="btn btn-secondary btn-sm" onclick="startEditToolLibraryItem(${idx})" title="Edit">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="removeToolLibraryItem(${idx})" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -448,13 +467,57 @@
                 <td><code>${escapeHtml(name)}</code></td>
                 <td><code>${escapeHtml(WORDLISTS[name] || '')}</code></td>
                 <td>
-                    <button class="btn btn-danger btn-sm" onclick="removeWordlist('${name.replace(/'/g, "\'")}')">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    <div class="d-flex gap-10">
+                        <button class="btn btn-secondary btn-sm" onclick="startEditWordlist('${name.replace(/'/g, "\'")}')" title="Edit">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="removeWordlist('${name.replace(/'/g, "\'")}')" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
                 </td>
             `;
             tbody.appendChild(tr);
         });
+    }
+
+
+    function setToolLibraryEditMode(isEditing) {
+        const submitText = document.getElementById('tl_submit_text');
+        const submitIcon = document.getElementById('tl_submit_icon');
+        const cancelBtn = document.getElementById('tl_cancel_btn');
+        if (!submitText || !submitIcon || !cancelBtn) return;
+        if (isEditing) {
+            submitText.textContent = 'Save Tool';
+            submitIcon.className = 'fas fa-save';
+            cancelBtn.style.display = '';
+        } else {
+            submitText.textContent = 'Add Tool';
+            submitIcon.className = 'fas fa-plus';
+            cancelBtn.style.display = 'none';
+        }
+    }
+
+    function startEditToolLibraryItem(idx) {
+        const item = TOOL_LIBRARY[idx];
+        if (!item) return;
+        EDIT_TL_INDEX = idx;
+        document.getElementById('tl_name').value = item.name || '';
+        document.getElementById('tl_path').value = item.path || '';
+        document.getElementById('tl_default_cmd').value = item.default_command || '';
+        document.getElementById('tl_update_cmd').value = item.update_command || '';
+        document.getElementById('tl_desc').value = item.description || '';
+        setToolLibraryEditMode(true);
+    }
+
+    function cancelEditToolLibraryItem() {
+        EDIT_TL_INDEX = null;
+        document.getElementById('tl_name').value = '';
+        document.getElementById('tl_path').value = '';
+        document.getElementById('tl_default_cmd').value = '';
+        document.getElementById('tl_update_cmd').value = '';
+        document.getElementById('tl_desc').value = '';
+        setToolLibraryEditMode(false);
     }
 
     function addToolLibraryItem() {
@@ -469,15 +532,29 @@
             return;
         }
 
-        const id = 'tl_' + Date.now() + '_' + Math.random().toString(16).slice(2);
-        TOOL_LIBRARY.push({
-            id: id,
-            name: name,
-            path: path,
-            default_command: defCmd,
-            update_command: updCmd,
-            description: desc
-        });
+        if (EDIT_TL_INDEX !== null && TOOL_LIBRARY[EDIT_TL_INDEX]) {
+            // Preserve id for stable references.
+            TOOL_LIBRARY[EDIT_TL_INDEX] = {
+                ...TOOL_LIBRARY[EDIT_TL_INDEX],
+                name: name,
+                path: path,
+                default_command: defCmd,
+                update_command: updCmd,
+                description: desc
+            };
+            EDIT_TL_INDEX = null;
+            setToolLibraryEditMode(false);
+        } else {
+            const id = 'tl_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+            TOOL_LIBRARY.push({
+                id: id,
+                name: name,
+                path: path,
+                default_command: defCmd,
+                update_command: updCmd,
+                description: desc
+            });
+        }
 
         document.getElementById('tl_name').value = '';
         document.getElementById('tl_path').value = '';
@@ -490,9 +567,49 @@
     }
 
     function removeToolLibraryItem(idx) {
+        if (EDIT_TL_INDEX !== null) {
+            if (idx === EDIT_TL_INDEX) {
+                cancelEditToolLibraryItem();
+            } else if (idx < EDIT_TL_INDEX) {
+                // Keep edit index aligned after deletion.
+                EDIT_TL_INDEX -= 1;
+            }
+        }
         TOOL_LIBRARY.splice(idx, 1);
         renderToolLibrary();
         saveExtraSettings();
+    }
+
+
+    function setWordlistEditMode(isEditing) {
+        const submitText = document.getElementById('wl_submit_text');
+        const submitIcon = document.getElementById('wl_submit_icon');
+        const cancelBtn = document.getElementById('wl_cancel_btn');
+        if (!submitText || !submitIcon || !cancelBtn) return;
+        if (isEditing) {
+            submitText.textContent = 'Save Wordlist';
+            submitIcon.className = 'fas fa-save';
+            cancelBtn.style.display = '';
+        } else {
+            submitText.textContent = 'Add Wordlist';
+            submitIcon.className = 'fas fa-plus';
+            cancelBtn.style.display = 'none';
+        }
+    }
+
+    function startEditWordlist(name) {
+        if (!name || !(name in WORDLISTS)) return;
+        EDIT_WL_NAME = name;
+        document.getElementById('wl_name').value = name;
+        document.getElementById('wl_path').value = WORDLISTS[name] || '';
+        setWordlistEditMode(true);
+    }
+
+    function cancelEditWordlist() {
+        EDIT_WL_NAME = null;
+        document.getElementById('wl_name').value = '';
+        document.getElementById('wl_path').value = '';
+        setWordlistEditMode(false);
     }
 
     function addWordlist() {
@@ -502,7 +619,26 @@
             alert('Wordlist Name and Path are required.');
             return;
         }
-        WORDLISTS[name] = path;
+        if (EDIT_WL_NAME !== null) {
+            const oldName = EDIT_WL_NAME;
+            const newName = name;
+            if (!oldName || !(oldName in WORDLISTS)) {
+                // Edit target vanished; fall back to add.
+                EDIT_WL_NAME = null;
+            } else {
+                if (newName !== oldName && (newName in WORDLISTS)) {
+                    alert('A wordlist with that name already exists. Choose a different name.');
+                    return;
+                }
+                const val = path;
+                delete WORDLISTS[oldName];
+                WORDLISTS[newName] = val;
+                EDIT_WL_NAME = null;
+                setWordlistEditMode(false);
+            }
+        } else {
+            WORDLISTS[name] = path;
+        }
         document.getElementById('wl_name').value = '';
         document.getElementById('wl_path').value = '';
         renderWordlists();
@@ -510,6 +646,9 @@
     }
 
     function removeWordlist(name) {
+        if (EDIT_WL_NAME !== null && name === EDIT_WL_NAME) {
+            cancelEditWordlist();
+        }
         delete WORDLISTS[name];
         renderWordlists();
         saveExtraSettings();
@@ -544,6 +683,8 @@
     document.addEventListener('DOMContentLoaded', () => {
         renderToolLibrary();
         renderWordlists();
+        setToolLibraryEditMode(false);
+        setWordlistEditMode(false);
     });
 </script>
 {% endblock %}

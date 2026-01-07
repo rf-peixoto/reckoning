@@ -66,6 +66,12 @@ workflows_db = OrderedDict()
 execution_history = OrderedDict()
 update_history = OrderedDict()
 
+# Execution control (in-memory)
+# - active_processes: current subprocess (per execution) so we can terminate on cancel
+# - cancel_events: cancellation signal (per execution)
+active_processes: Dict[str, subprocess.Popen] = {}
+cancel_events: Dict[str, threading.Event] = {}
+
 # Concurrency control for shared in-memory state
 execution_lock = threading.RLock()
 
@@ -267,7 +273,8 @@ class WorkflowExecution:
     """Complete execution instance"""
     def __init__(self, execution_id, workflow_id, domain, status='queued',
                  results=None, created_at=None, started_at=None, completed_at=None,
-                 version: int = 0, last_updated_at: str = None, events: list = None):
+                 version: int = 0, last_updated_at: str = None, events: list = None,
+                 cancel_requested: bool = False, cancelled_at: str = None):
         self.execution_id = execution_id
         self.workflow_id = workflow_id
         self.domain = domain
@@ -279,6 +286,8 @@ class WorkflowExecution:
         self.version = int(version or 0)
         self.last_updated_at = last_updated_at or self.created_at
         self.events = events or []
+        self.cancel_requested = bool(cancel_requested)
+        self.cancelled_at = cancelled_at
 
     def to_dict(self, include_results: bool = True):
         data = {
@@ -291,10 +300,15 @@ class WorkflowExecution:
             'completed_at': self.completed_at,
             'version': self.version,
             'last_updated_at': self.last_updated_at,
-            'events': self.events
+            'events': self.events,
+            'cancel_requested': getattr(self, 'cancel_requested', False),
+            'cancelled_at': getattr(self, 'cancelled_at', None)
         }
         if include_results:
-            data['results'] = {k: v.to_dict() for k, v in self.results.items()}
+            # Snapshot under lock to avoid races while the execution thread is updating results.
+            with execution_lock:
+                snapshot = dict(self.results or {})
+            data['results'] = {k: v.to_dict() for k, v in snapshot.items()}
         return data
 
 class UpdateResult:
@@ -331,8 +345,10 @@ def parse_args_template(template: str, context: Dict[str, Any]) -> str:
     for key, value in context.items():
         placeholder = f"{{{key}}}"
         if placeholder in template:
-            # If value is a file path and contains spaces, quote it
-            if isinstance(value, str) and os.path.exists(value):
+            # If value is a file path and contains spaces, quote it.
+            # Only apply this to placeholders that are likely to be file paths to avoid
+            # accidentally quoting arbitrary strings that happen to match an existing path.
+            if isinstance(value, str) and os.path.exists(value) and ' ' in value:
                 value = f'"{value}"'
             logger.debug(f"Replacing {placeholder} with: {value[:100] if isinstance(value, str) and len(value) > 100 else value}")
             template = template.replace(placeholder, str(value))
@@ -393,8 +409,93 @@ def find_tool_id_by_step(workflow, step_number):
         return workflow.tools[step_number - 1].id
     return None
 
-def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict[str, Any]], 
-                 temp_dir: str, execution_context: Dict[str, Any]) -> ExecutionResult:
+def _terminate_process_tree(proc: subprocess.Popen):
+    """Best-effort termination of a running subprocess (and its process group)."""
+    if proc is None:
+        return
+    try:
+        if os.name == 'nt':
+            # On Windows, terminate the process; child processes may require additional handling.
+            proc.terminate()
+        else:
+            # On POSIX, kill the whole process group (if created).
+            import signal
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                proc.terminate()
+    except Exception:
+        pass
+
+
+def _run_command_cancellable(execution_id: str, cmd: str, stdin_data: Optional[str], timeout_seconds: int, cancel_event: Optional[threading.Event]):
+    """Run a shell command with cancellation support.
+
+    Returns: (returncode, stdout, stderr)
+    Raises: subprocess.TimeoutExpired
+    """
+    start = time.time()
+
+    # Configure process group so we can terminate the whole tree on POSIX.
+    popen_kwargs = {
+        "shell": True,
+        "stdin": subprocess.PIPE if stdin_data is not None else None,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+    }
+
+    if os.name == 'nt':
+        # CREATE_NEW_PROCESS_GROUP enables sending ctrl events, but terminate() is enough for now.
+        try:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+        except Exception:
+            pass
+    else:
+        import os as _os
+        popen_kwargs["preexec_fn"] = _os.setsid
+
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    with execution_lock:
+        active_processes[execution_id] = proc
+
+    try:
+        # Poll loop so we can react to cancellation.
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                _terminate_process_tree(proc)
+                break
+
+            if timeout_seconds is not None and (time.time() - start) > timeout_seconds:
+                _terminate_process_tree(proc)
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout_seconds)
+
+            rc = proc.poll()
+            if rc is not None:
+                break
+            time.sleep(0.1)
+
+        try:
+            stdout, stderr = proc.communicate(input=stdin_data, timeout=5)
+        except Exception:
+            # Best-effort: if the process is still alive, force-terminate and re-collect.
+            try:
+                _terminate_process_tree(proc)
+            except Exception:
+                pass
+            stdout, stderr = proc.communicate(input=stdin_data)
+        return proc.returncode, stdout or "", stderr or ""
+    finally:
+        with execution_lock:
+            # Only clear if we're still the current process for this execution.
+            if active_processes.get(execution_id) is proc:
+                active_processes.pop(execution_id, None)
+
+
+def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict[str, Any]],
+                 temp_dir: str, execution_context: Dict[str, Any],
+                 cancel_event: Optional[threading.Event] = None,
+                 execution_id: Optional[str] = None) -> ExecutionResult:
     """Execute a single tool with enhanced input/output handling"""
     logger.info(f"=== STARTING EXECUTION OF TOOL: {tool.name} (ID: {tool.id}) ===")
     settings = load_settings()
@@ -430,19 +531,31 @@ def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict
         logger.info(f"Initial context keys: {list(context.keys())}")
         logger.info(f"Previous outputs available from tools: {list(previous_outputs.keys())}")
         
-        # Store previous outputs by their placeholder names
+        # Store previous outputs in the template context.
+        # Notes:
+        # - We keep the existing behavior of exposing outputs via placeholder_name and
+        #   indexed placeholders for backward compatibility.
+        # - To avoid silent collisions (multiple tools using the same placeholder_name),
+        #   we also expose stable per-tool keys: out_<tool_id> and step_<n>.
         for idx, (tool_id, output_data) in enumerate(previous_outputs.items()):
             # Get the tool that produced this output
             prev_tool = find_tool_by_id(execution_context['workflow'], tool_id)
             if prev_tool:
                 # Use the previous tool's placeholder name
                 placeholder = prev_tool.placeholder_name
+                # Preserve any previous value if this placeholder is reused.
+                if placeholder in context and context.get(placeholder) != output_data['output']:
+                    context[f"{placeholder}_{idx}"] = context.get(placeholder)
                 context[placeholder] = output_data['output']
                 # Also add as indexed placeholder for backward compatibility
                 context[str(idx + 1)] = output_data['output']
+                # Stable keys (recommended)
+                context[f"out_{tool_id}"] = output_data['output']
+                context[f"step_{idx + 1}"] = output_data['output']
                 logger.info(f"Added output from tool {prev_tool.name} (ID: {tool_id}) to context:")
                 logger.info(f"  - Key '{placeholder}': {output_data['output'][:200]}...")
                 logger.info(f"  - Also available as '{idx + 1}'")
+                logger.info(f"  - Also available as 'out_{tool_id}' and 'step_{idx + 1}'")
         
         # Handle input based on input_method
         input_content = None
@@ -572,18 +685,31 @@ def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict
         settings = load_settings()
         timeout_value = int(settings.get('max_execution_time', 300))
         
-        # Execute with appropriate input method
+        # Execute with appropriate input method (cancellable)
         logger.info(f"Executing command with timeout {timeout_value} seconds...")
-        process = subprocess.run(
-            cmd,
-            shell=True,
-            input=stdin_data,
-            capture_output=True,
-            text=True,
-            timeout=timeout_value
-        )
-        
-        result.exit_code = process.returncode
+
+        exec_id = execution_id or execution_context.get('execution_id')
+        if not exec_id:
+            # Fallback: no execution id; run without cancellability bookkeeping.
+            process = subprocess.run(
+                cmd,
+                shell=True,
+                input=stdin_data,
+                capture_output=True,
+                text=True,
+                timeout=timeout_value
+            )
+            rc, stdout, stderr = process.returncode, process.stdout, process.stderr
+        else:
+            rc, stdout, stderr = _run_command_cancellable(
+                execution_id=str(exec_id),
+                cmd=cmd,
+                stdin_data=stdin_data,
+                timeout_seconds=timeout_value,
+                cancel_event=cancel_event
+            )
+
+        result.exit_code = rc
         
         # If output is to a file, read it
         if tool.output_handling == 'file' and 'output_file' in context and os.path.exists(context['output_file']):
@@ -591,24 +717,31 @@ def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict
                 result.output = f.read()
             logger.info(f"Read output from file: {context['output_file']}")
         else:
-            result.output = process.stdout
+            result.output = stdout
         
-        result.error = process.stderr
-        result.status = 'completed' if process.returncode == 0 else 'failed'
+        result.error = stderr
+        # If the execution was cancelled mid-tool, mark status accordingly.
+        if cancel_event is not None and cancel_event.is_set():
+            result.status = 'cancelled'
+        else:
+            result.status = 'completed' if rc == 0 else 'failed'
         
         logger.info(f"Command execution completed:")
-        logger.info(f"  - Exit code: {process.returncode}")
+        logger.info(f"  - Exit code: {rc}")
         logger.info(f"  - Status: {result.status}")
         logger.info(f"  - Output size: {len(result.output)} characters")
         logger.info(f"  - Error size: {len(result.error)} characters")
         
-        if process.returncode != 0:
-            logger.error(f"Command failed with exit code {process.returncode}")
+        if rc != 0 and result.status != 'cancelled':
+            logger.error(f"Command failed with exit code {rc}")
             logger.error(f"STDOUT (first 500 chars): {result.output[:500]}")
             logger.error(f"STDERR (first 500 chars): {result.error[:500]}")
         else:
-            logger.info(f"Command succeeded")
-            logger.debug(f"Output (first 500 chars): {result.output[:500]}")
+            if result.status == 'cancelled':
+                logger.warning("Command was cancelled by the user")
+            else:
+                logger.info(f"Command succeeded")
+                logger.debug(f"Output (first 500 chars): {result.output[:500]}")
         
     except subprocess.TimeoutExpired:
         settings = load_settings()
@@ -723,15 +856,22 @@ def run_workflow_thread(execution: WorkflowExecution):
     else:
         temp_dir = tempfile.mkdtemp(prefix="workflow_")
     previous_outputs = {}  # Store outputs by tool ID
+
+    # Cancellation signal for this execution (created when the execution is enqueued).
+    cancel_event = None
+    with execution_lock:
+        cancel_event = cancel_events.get(execution.execution_id)
     
     try:
         workflow = workflows_db.get(execution.workflow_id)
         if not workflow:
-            execution.status = 'failed'
+            with execution_lock:
+                execution.status = 'failed'
             return
-        
-        execution.status = 'running'
-        execution.started_at = datetime.now().isoformat()
+
+        with execution_lock:
+            execution.status = 'running'
+            execution.started_at = datetime.now().isoformat()
         _record_event(execution, 'execution_started', f"Execution started for domain: {execution.domain}")
         logger.info(f"=== STARTING WORKFLOW EXECUTION ===")
         logger.info(f"Execution ID: {execution.execution_id}")
@@ -759,6 +899,14 @@ def run_workflow_thread(execution: WorkflowExecution):
         
         # Execute tools in order
         for idx, tool in enumerate(workflow.tools):
+            if cancel_event is not None and cancel_event.is_set():
+                with execution_lock:
+                    execution.status = 'cancelled'
+                    execution.cancel_requested = True
+                    execution.cancelled_at = datetime.now().isoformat()
+                _record_event(execution, 'execution_cancelled', 'Execution cancelled by user')
+                logger.warning("Execution cancelled before starting next tool")
+                break
             if not tool.enabled:
                 logger.info(f"Skipping disabled tool: {tool.name}")
                 _record_event(execution, 'tool_skipped', f"Tool skipped (disabled): {tool.name}", tool_id=tool.id)
@@ -770,8 +918,17 @@ def run_workflow_thread(execution: WorkflowExecution):
             
             # Execute tool with context
             _record_event(execution, 'tool_started', f"Tool started: {tool.name}", tool_id=tool.id)
-            result = execute_tool(tool, execution.domain, previous_outputs, temp_dir, execution_context)
-            execution.results[tool.id] = result
+            result = execute_tool(
+                tool,
+                execution.domain,
+                previous_outputs,
+                temp_dir,
+                execution_context,
+                cancel_event=cancel_event,
+                execution_id=execution.execution_id
+            )
+            with execution_lock:
+                execution.results[tool.id] = result
             
             _record_event(execution, 'tool_finished', f"Tool finished: {tool.name} ({result.status})", level=('error' if result.status=='failed' else 'info'), tool_id=tool.id)
             # Store output for next tools if successful and provides output
@@ -789,10 +946,22 @@ def run_workflow_thread(execution: WorkflowExecution):
                 if result.error:
                     logger.warning(f"  Error: {result.error[:500]}")
                 # Continue with next tool even if this one failed
-        
-        execution.status = 'completed'
-        
-        _record_event(execution, 'execution_completed', 'Execution completed successfully')
+
+            # If the running tool was cancelled, end the workflow.
+            if result.status == 'cancelled':
+                with execution_lock:
+                    execution.status = 'cancelled'
+                    execution.cancel_requested = True
+                    execution.cancelled_at = datetime.now().isoformat()
+                _record_event(execution, 'execution_cancelled', 'Execution cancelled by user')
+                logger.warning("Execution cancelled during tool execution")
+                break
+
+        # If not cancelled/failed, mark completed.
+        with execution_lock:
+            if execution.status == 'running':
+                execution.status = 'completed'
+                _record_event(execution, 'execution_completed', 'Execution completed successfully')
         logger.info(f"\n{'='*60}")
         logger.info(f"WORKFLOW EXECUTION COMPLETED")
         logger.info(f"Status: {execution.status}")
@@ -801,13 +970,18 @@ def run_workflow_thread(execution: WorkflowExecution):
         logger.info(f"{'='*60}")
         
     except Exception as e:
-        execution.status = 'failed'
+        with execution_lock:
+            execution.status = 'failed'
         logger.error(f"Workflow execution failed: {e}")
         _record_event(execution, 'execution_failed', f"Workflow execution failed: {e}", level='error')
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
     finally:
-        execution.completed_at = datetime.now().isoformat()
+        with execution_lock:
+            execution.completed_at = datetime.now().isoformat()
+        # Ensure no stale active process handle remains.
+        with execution_lock:
+            active_processes.pop(execution.execution_id, None)
         # Clean up temp directory if enabled
         try:
             if app_settings.get('auto_cleanup', True):
@@ -871,7 +1045,7 @@ def index():
 def create_workflow():
     """Create or edit workflow"""
     if request.method == 'POST':
-        data = request.json
+        data = request.get_json(silent=True) or {}
         workflow_id = data.get('id', str(uuid.uuid4()))
         
         # Parse tools from JSON
@@ -918,7 +1092,7 @@ def delete_workflow(workflow_id):
 @app.route('/execute', methods=['POST'])
 def execute_workflow():
     """Execute a workflow"""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     workflow_id = data.get('workflow_id')
     domain = data.get('domain')
     
@@ -943,6 +1117,10 @@ def execute_workflow():
     )
     
     execution_history[execution_id] = execution
+
+    # Register cancel event for this execution
+    with execution_lock:
+        cancel_events[execution_id] = threading.Event()
     
     # Start execution in background thread
     thread = threading.Thread(target=run_workflow_thread, args=(execution,))
@@ -1194,9 +1372,62 @@ def executions_list():
 def delete_execution(execution_id):
     """Delete an execution"""
     if execution_id in execution_history:
-        del execution_history[execution_id]
-        return jsonify({'success': True})
-    return jsonify({'success': False, 'error': 'Execution not found'})
+        # Best-effort: cancel and terminate any running subprocess first.
+        with execution_lock:
+            evt = cancel_events.get(execution_id)
+            if evt:
+                evt.set()
+            proc = active_processes.get(execution_id)
+        if proc is not None:
+            _terminate_process_tree(proc)
+
+        with execution_lock:
+            execution_history.pop(execution_id, None)
+            cancel_events.pop(execution_id, None)
+            active_processes.pop(execution_id, None)
+
+        if wants_json_response():
+            return jsonify({'success': True})
+        flash('Execution deleted.', 'success')
+        return redirect(url_for('executions_list'))
+
+    if wants_json_response():
+        return jsonify({'success': False, 'error': 'Execution not found'}), 404
+    flash('Execution not found.', 'error')
+    return redirect(url_for('executions_list'))
+
+
+@app.route('/execution/cancel/<execution_id>', methods=['POST'])
+def cancel_execution(execution_id):
+    """Cancel a running execution (best-effort)."""
+    execution = execution_history.get(execution_id)
+    if not execution:
+        if wants_json_response():
+            return jsonify({'success': False, 'error': 'Execution not found'}), 404
+        flash('Execution not found.', 'error')
+        return redirect(url_for('executions_list'))
+
+    with execution_lock:
+        evt = cancel_events.get(execution_id)
+        if evt is None:
+            evt = threading.Event()
+            cancel_events[execution_id] = evt
+        evt.set()
+        execution.cancel_requested = True
+        if execution.status in ('queued', 'running'):
+            execution.status = 'cancelling'
+        execution.last_updated_at = _now_iso()
+        proc = active_processes.get(execution_id)
+
+    if proc is not None:
+        _terminate_process_tree(proc)
+
+    _record_event(execution, 'cancel_requested', 'Cancel requested by user')
+
+    if wants_json_response():
+        return jsonify({'success': True, 'status': execution.status})
+    flash('Cancel requested.', 'info')
+    return redirect(url_for('execution_status', execution_id=execution_id))
 
 @app.route('/execution/export/<execution_id>')
 def export_execution(execution_id):
@@ -1226,9 +1457,23 @@ def export_execution(execution_id):
 def clear_all_executions():
     """Clear all execution history"""
     if request.method == 'POST':
-        confirmation = request.json.get('confirm', False)
+        data = request.get_json(silent=True) or {}
+        confirmation = data.get('confirm', False)
         if confirmation:
-            execution_history.clear()
+            # Best-effort: stop any running executions first.
+            with execution_lock:
+                for exec_id, proc in list(active_processes.items()):
+                    try:
+                        evt = cancel_events.get(exec_id)
+                        if evt:
+                            evt.set()
+                    except Exception:
+                        pass
+                for proc in list(active_processes.values()):
+                    _terminate_process_tree(proc)
+                active_processes.clear()
+                cancel_events.clear()
+                execution_history.clear()
             return jsonify({'success': True, 'message': 'All executions cleared'})
         return jsonify({'success': False, 'error': 'Confirmation required'})
     return jsonify({'success': False, 'error': 'Invalid request'})
@@ -1259,7 +1504,7 @@ def update_settings():
     """Update application settings"""
     if request.method == 'POST':
         try:
-            data = request.json
+            data = request.get_json(silent=True) or {}
             # Backward/forward compatibility: accept 'notifications' as alias for 'enable_notifications'
             if isinstance(data, dict) and 'notifications' in data and 'enable_notifications' not in data:
                 data['enable_notifications'] = data.pop('notifications')
@@ -1521,7 +1766,7 @@ def tools_update():
 @app.route('/api/tool/update', methods=['POST'])
 def update_tool():
     """Update a specific tool"""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     tool_id = data.get('tool_id')
     workflow_id = data.get('workflow_id')
 
@@ -1576,7 +1821,7 @@ def update_tool():
 @app.route('/api/tools/update-all', methods=['POST'])
 def update_all_tools():
     """Update all tools with update commands"""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     workflow_id = data.get('workflow_id')
     
     tools_to_update = []
