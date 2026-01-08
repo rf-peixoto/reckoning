@@ -13,6 +13,69 @@
     </div>
 </div>
 
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-info-circle"></i> System Information
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20" style="flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 300px;">
+                <h4 style="color: var(--accent); margin-bottom: 15px;">Platform Info</h4>
+                <table style="width: 100%; color: var(--text-muted);">
+                    <tr>
+                        <td style="padding: 8px 0;"><strong>Python Version:</strong></td>
+                        <td style="padding: 8px 0;">{{ system_info.python_version.split()[0] }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 0;"><strong>Platform:</strong></td>
+                        <td style="padding: 8px 0;">{{ system_info.platform }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 0;"><strong>CPU Cores:</strong></td>
+                        <td style="padding: 8px 0;">{{ system_info.cpu_count }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 0;"><strong>Workflows:</strong></td>
+                        <td style="padding: 8px 0;">{{ system_info.workflows_count }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 0;"><strong>Executions:</strong></td>
+                        <td style="padding: 8px 0;">{{ system_info.executions_count }}</td>
+                    </tr>
+                </table>
+            </div>
+            <div style="flex: 1; min-width: 300px;">
+                <h4 style="color: var(--accent); margin-bottom: 15px;">Disk Usage</h4>
+                <div style="background: var(--primary); border-radius: 4px; padding: 15px;">
+                    <div style="margin-bottom: 10px;">
+                        <div class="d-flex justify-between">
+                            <span>Used</span>
+                            <span>{{ "%.1f"|format(system_info.disk_usage.used / (1024**3)) }} GB</span>
+                        </div>
+                        <div class="progress-bar" style="margin-top: 5px;">
+                            <div class="progress-fill" style="width: {{ (system_info.disk_usage.used / system_info.disk_usage.total * 100)|round|int }}%;"></div>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <div class="d-flex justify-between">
+                            <span>Free</span>
+                            <span>{{ "%.1f"|format(system_info.disk_usage.free / (1024**3)) }} GB</span>
+                        </div>
+                        <div class="progress-bar" style="margin-top: 5px;">
+                            <div class="progress-fill" style="width: {{ (system_info.disk_usage.free / system_info.disk_usage.total * 100)|round|int }}%; background: var(--success);"></div>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-between mt-10">
+                        <strong>Total</strong>
+                        <strong>{{ "%.1f"|format(system_info.disk_usage.total / (1024**3)) }} GB</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="card mb-20">
     <div class="card-header">
@@ -39,14 +102,7 @@
                         </label>
                         <div class="form-text">Automatically clean up temporary files</div>
                     </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">
-                            <input type="checkbox" name="notifications" {% if settings.notifications %}checked{% endif %}>
-                            Enable Notifications
-                        </label>
-                        <div class="form-text">Show desktop notifications</div>
-                    </div>
+
                 </div>
                 
                 <div style="flex: 1; min-width: 300px;">
@@ -64,14 +120,6 @@
                         <div class="form-text">Maximum output size to store per tool</div>
                     </div>
                     
-                    <div class="form-group">
-                        <label class="form-label">Default Theme</label>
-                        <select class="form-control" name="default_theme">
-                            <option value="dark" {% if settings.default_theme == 'dark' %}selected{% endif %}>Dark</option>
-                            <option value="light" {% if settings.default_theme == 'light' %}selected{% endif %}>Light</option>
-                            <option value="blue" {% if settings.default_theme == 'blue' %}selected{% endif %}>Blue</option>
-                        </select>
-                    </div>
                 </div>
             </div>
             
