@@ -1482,22 +1482,9 @@ def clear_all_executions():
 @app.route('/settings')
 def settings():
     """Settings page"""
-    import sys
-    
-    system_info = {
-        'python_version': sys.version,
-        'platform': sys.platform,
-        'workflows_count': len(workflows_db),
-        'executions_count': len(execution_history),
-        'disk_usage': shutil.disk_usage('.'),
-        'cpu_count': os.cpu_count()
-    }
-    
     app_settings = load_settings()
-    
-    return render_template('settings.html', 
-                         system_info=system_info, 
-                         settings=app_settings)
+
+    return render_template("settings.html", settings=app_settings)
 
 @app.route('/settings/update', methods=['POST'])
 def update_settings():
