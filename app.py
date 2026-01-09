@@ -84,6 +84,17 @@ def _sha256_text(value: str) -> str:
 def _now_iso() -> str:
     return datetime.now().isoformat()
 
+def _int_or_none(v) -> Optional[int]:
+    """Best-effort int parsing for values coming from JSON/forms."""
+    if v is None:
+        return None
+    try:
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return int(v)
+    except Exception:
+        return None
+
 def _record_event(execution, event_type: str, message: str, level: str = "info", tool_id: str = None):
     """Append a structured event to an execution and bump its version."""
     evt = {
@@ -127,7 +138,10 @@ DEFAULT_SETTINGS = {
 
 class ToolConfig:
     """Configuration for a single tool/module"""
-    def __init__(self, tool_id, name, command='', args_template='', input_source='previous',
+    # input_source historically supported: 'initial', 'previous', 'specific', 'none'.
+    # The workflow editor now defaults to 'specific' ("any tool") and hides the legacy options,
+    # but we keep backward-compatibility for previously saved workflows.
+    def __init__(self, tool_id, name, command='', args_template='', input_source='specific',
                  library_tool_id=None,
                  command_override=None,
                  args_template_override=None,
@@ -202,7 +216,7 @@ class ToolConfig:
             name=data['name'],
             command=data.get('command',''),
             args_template=data.get('args_template',''),
-            input_source=data.get('input_source', 'previous'),
+            input_source=data.get('input_source', 'specific'),
             library_tool_id=data.get('library_tool_id'),
             command_override=data.get('command_override'),
             args_template_override=data.get('args_template_override'),
@@ -224,7 +238,20 @@ class ToolConfig:
 
 class Workflow:
     """Complete workflow configuration"""
-    def __init__(self, workflow_id, name, description, tools, created_at, updated_at, author="anonymous"):
+    def __init__(
+        self,
+        workflow_id,
+        name,
+        description,
+        tools,
+        created_at,
+        updated_at,
+        author="anonymous",
+        run_mode: str = "once",
+        interval_minutes: Optional[int] = None,
+        repeat_count: Optional[int] = None,
+        repeat_interval_minutes: Optional[int] = None,
+    ):
         self.id = workflow_id
         self.name = name
         self.description = description
@@ -232,6 +259,14 @@ class Workflow:
         self.created_at = created_at
         self.updated_at = updated_at
         self.author = author
+        # Recurrence configuration
+        # - run_mode: 'once' | 'interval' | 'repeat'
+        # - interval: run indefinitely every N minutes
+        # - repeat: run repeat_count times, sleeping repeat_interval_minutes between runs
+        self.run_mode = (run_mode or "once").strip().lower()
+        self.interval_minutes = interval_minutes
+        self.repeat_count = repeat_count
+        self.repeat_interval_minutes = repeat_interval_minutes
     
     def to_dict(self):
         return {
@@ -241,7 +276,11 @@ class Workflow:
             'tools': [tool.to_dict() for tool in self.tools],
             'created_at': self.created_at,
             'updated_at': self.updated_at,
-            'author': self.author
+            'author': self.author,
+            'run_mode': getattr(self, 'run_mode', 'once'),
+            'interval_minutes': getattr(self, 'interval_minutes', None),
+            'repeat_count': getattr(self, 'repeat_count', None),
+            'repeat_interval_minutes': getattr(self, 'repeat_interval_minutes', None),
         }
 
 class ExecutionResult:
@@ -274,7 +313,14 @@ class WorkflowExecution:
     def __init__(self, execution_id, workflow_id, domain, status='queued',
                  results=None, created_at=None, started_at=None, completed_at=None,
                  version: int = 0, last_updated_at: str = None, events: list = None,
-                 cancel_requested: bool = False, cancelled_at: str = None):
+                 cancel_requested: bool = False, cancelled_at: str = None,
+                 run_mode: str = 'once',
+                 interval_minutes: Optional[int] = None,
+                 repeat_count: Optional[int] = None,
+                 repeat_interval_minutes: Optional[int] = None,
+                 current_iteration: int = 0,
+                 planned_iterations: Optional[int] = None,
+                 iterations: Optional[list] = None):
         self.execution_id = execution_id
         self.workflow_id = workflow_id
         self.domain = domain
@@ -288,6 +334,15 @@ class WorkflowExecution:
         self.events = events or []
         self.cancel_requested = bool(cancel_requested)
         self.cancelled_at = cancelled_at
+        # Recurrence metadata (non-breaking: kept optional and ignored by older UIs)
+        self.run_mode = (run_mode or 'once')
+        self.interval_minutes = interval_minutes
+        self.repeat_count = repeat_count
+        self.repeat_interval_minutes = repeat_interval_minutes
+        self.current_iteration = int(current_iteration or 0)
+        self.planned_iterations = planned_iterations
+        # iterations is a list of per-iteration summaries + results snapshots
+        self.iterations = iterations or []
 
     def to_dict(self, include_results: bool = True):
         data = {
@@ -303,6 +358,14 @@ class WorkflowExecution:
             'events': self.events,
             'cancel_requested': getattr(self, 'cancel_requested', False),
             'cancelled_at': getattr(self, 'cancelled_at', None)
+            ,
+            'run_mode': getattr(self, 'run_mode', 'once'),
+            'interval_minutes': getattr(self, 'interval_minutes', None),
+            'repeat_count': getattr(self, 'repeat_count', None),
+            'repeat_interval_minutes': getattr(self, 'repeat_interval_minutes', None),
+            'current_iteration': getattr(self, 'current_iteration', 0),
+            'planned_iterations': getattr(self, 'planned_iterations', None),
+            'iterations': getattr(self, 'iterations', []),
         }
         if include_results:
             # Snapshot under lock to avoid races while the execution thread is updating results.
@@ -564,15 +627,34 @@ def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict
         logger.info(f"  - Specific step (if set): {tool.specific_step}")
         
         if tool.input_source != 'none' and tool.input_method != 'none':
-            if tool.input_source == 'specific' and tool.specific_step:
-                # Use specific step's output
-                source_tool_id = find_tool_id_by_step(execution_context['workflow'], tool.specific_step)
-                logger.info(f"  Looking for specific step {tool.specific_step} -> tool ID: {source_tool_id}")
-                if source_tool_id and source_tool_id in previous_outputs:
-                    input_content = previous_outputs[source_tool_id]['output']
-                    logger.info(f"  Found input from specific tool {source_tool_id}")
-                else:
-                    logger.warning(f"  Could not find output from specific step {tool.specific_step}")
+            if tool.input_source == 'specific':
+                # Use a specific step's output ("any tool").
+                # If the configured step is missing/invalid, fall back safely.
+                step = None
+                try:
+                    step = int(tool.specific_step) if tool.specific_step is not None else None
+                except Exception:
+                    step = None
+
+                if step:
+                    source_tool_id = find_tool_id_by_step(execution_context['workflow'], step)
+                    logger.info(f"  Looking for specific step {step} -> tool ID: {source_tool_id}")
+                    if source_tool_id and source_tool_id in previous_outputs:
+                        input_content = previous_outputs[source_tool_id]['output']
+                        logger.info(f"  Found input from specific tool {source_tool_id}")
+                    else:
+                        logger.warning(f"  Could not find output from specific step {step}; will fall back")
+
+                # Fallback if step not set or not found
+                if input_content is None:
+                    if previous_outputs:
+                        last_tool_id = list(previous_outputs.keys())[-1]
+                        input_content = previous_outputs[last_tool_id]['output']
+                        logger.info(f"  Fallback to most recent output (ID: {last_tool_id})")
+                    else:
+                        input_content = domain
+                        logger.info(f"  Fallback to domain as input: {domain}")
+
             elif tool.input_source == 'initial':
                 input_content = domain
                 logger.info(f"  Using initial domain as input: {domain}")
@@ -897,65 +979,175 @@ def run_workflow_thread(execution: WorkflowExecution):
             'temp_dir': temp_dir
         }
         
-        # Execute tools in order
-        for idx, tool in enumerate(workflow.tools):
+        # Determine recurrence plan
+        mode = (getattr(workflow, 'run_mode', 'once') or 'once').strip().lower()
+        interval_minutes = _int_or_none(getattr(workflow, 'interval_minutes', None))
+        repeat_count = _int_or_none(getattr(workflow, 'repeat_count', None))
+        repeat_interval_minutes = _int_or_none(getattr(workflow, 'repeat_interval_minutes', None))
+
+        # Normalize invalid configs to safe defaults
+        if mode not in ('once', 'interval', 'repeat'):
+            mode = 'once'
+        if mode == 'interval' and (not interval_minutes or interval_minutes <= 0):
+            logger.warning("Invalid interval_minutes for recurring workflow; falling back to single run")
+            mode = 'once'
+        if mode == 'repeat':
+            if not repeat_count or repeat_count <= 0:
+                logger.warning("Invalid repeat_count for recurring workflow; falling back to single run")
+                mode = 'once'
+            if not repeat_interval_minutes or repeat_interval_minutes < 0:
+                repeat_interval_minutes = 0
+
+        planned_iterations = None
+        if mode == 'repeat':
+            planned_iterations = repeat_count
+
+        with execution_lock:
+            execution.run_mode = mode
+            execution.interval_minutes = interval_minutes
+            execution.repeat_count = repeat_count
+            execution.repeat_interval_minutes = repeat_interval_minutes
+            execution.planned_iterations = planned_iterations
+            execution.current_iteration = 0
+
+        def _sleep_cancellable(seconds: int) -> bool:
+            """Sleep up to 'seconds' seconds. Returns False if cancelled."""
+            if seconds <= 0:
+                return True
+            if cancel_event is None:
+                time.sleep(seconds)
+                return True
+            # Wait in a single call so cancellation wakes us immediately.
+            return not cancel_event.wait(timeout=seconds)
+
+        iteration = 0
+        while True:
             if cancel_event is not None and cancel_event.is_set():
                 with execution_lock:
                     execution.status = 'cancelled'
                     execution.cancel_requested = True
                     execution.cancelled_at = datetime.now().isoformat()
                 _record_event(execution, 'execution_cancelled', 'Execution cancelled by user')
-                logger.warning("Execution cancelled before starting next tool")
+                logger.warning("Execution cancelled before starting next iteration")
                 break
-            if not tool.enabled:
-                logger.info(f"Skipping disabled tool: {tool.name}")
-                _record_event(execution, 'tool_skipped', f"Tool skipped (disabled): {tool.name}", tool_id=tool.id)
-                continue
-            
-            logger.info(f"\n{'='*60}")
-            logger.info(f"EXECUTING TOOL {idx+1}/{len(workflow.tools)}: {tool.name}")
-            logger.info(f"{'='*60}")
-            
-            # Execute tool with context
-            _record_event(execution, 'tool_started', f"Tool started: {tool.name}", tool_id=tool.id)
-            result = execute_tool(
-                tool,
-                execution.domain,
-                previous_outputs,
-                temp_dir,
-                execution_context,
-                cancel_event=cancel_event,
-                execution_id=execution.execution_id
-            )
-            with execution_lock:
-                execution.results[tool.id] = result
-            
-            _record_event(execution, 'tool_finished', f"Tool finished: {tool.name} ({result.status})", level=('error' if result.status=='failed' else 'info'), tool_id=tool.id)
-            # Store output for next tools if successful and provides output
-            if result.status == 'completed' and tool.provides_output:
-                previous_outputs[tool.id] = {
-                    'output': result.output,
-                    'tool_name': tool.name,
-                    'output_format': tool.output_format
-                }
-                logger.info(f"✓ Tool {tool.name} completed successfully, output stored")
-                logger.info(f"  Output size: {len(result.output)} characters")
-                logger.info(f"  Output preview: {result.output[:200]}...")
-            else:
-                logger.warning(f"✗ Tool {tool.name} failed or doesn't provide output: {result.status}")
-                if result.error:
-                    logger.warning(f"  Error: {result.error[:500]}")
-                # Continue with next tool even if this one failed
 
-            # If the running tool was cancelled, end the workflow.
-            if result.status == 'cancelled':
+            iteration += 1
+            with execution_lock:
+                execution.current_iteration = iteration
+                execution.last_updated_at = _now_iso()
+
+            iter_started_at = datetime.now().isoformat()
+            _record_event(execution, 'iteration_started', f"Iteration {iteration} started", level='info')
+            logger.info(f"\n{'#'*72}")
+            logger.info(f"STARTING ITERATION {iteration} (mode={mode})")
+            logger.info(f"{'#'*72}")
+
+            # Each iteration starts with a fresh data-flow state.
+            previous_outputs = {}
+            iter_results_snapshot = {}
+
+            # Execute tools in order (single iteration)
+            for idx, tool in enumerate(workflow.tools):
+                if cancel_event is not None and cancel_event.is_set():
+                    with execution_lock:
+                        execution.status = 'cancelled'
+                        execution.cancel_requested = True
+                        execution.cancelled_at = datetime.now().isoformat()
+                    _record_event(execution, 'execution_cancelled', 'Execution cancelled by user')
+                    logger.warning("Execution cancelled before starting next tool")
+                    break
+
+                if not tool.enabled:
+                    logger.info(f"Skipping disabled tool: {tool.name}")
+                    _record_event(execution, 'tool_skipped', f"Tool skipped (disabled): {tool.name}", tool_id=tool.id)
+                    continue
+
+                logger.info(f"\n{'='*60}")
+                logger.info(f"EXECUTING TOOL {idx+1}/{len(workflow.tools)}: {tool.name}")
+                logger.info(f"{'='*60}")
+
+                _record_event(execution, 'tool_started', f"Tool started: {tool.name}", tool_id=tool.id)
+                result = execute_tool(
+                    tool,
+                    execution.domain,
+                    previous_outputs,
+                    temp_dir,
+                    execution_context,
+                    cancel_event=cancel_event,
+                    execution_id=execution.execution_id
+                )
+
                 with execution_lock:
-                    execution.status = 'cancelled'
-                    execution.cancel_requested = True
-                    execution.cancelled_at = datetime.now().isoformat()
-                _record_event(execution, 'execution_cancelled', 'Execution cancelled by user')
-                logger.warning("Execution cancelled during tool execution")
+                    # Keep latest results per tool id for compatibility with existing UI.
+                    execution.results[tool.id] = result
+
+                iter_results_snapshot[tool.id] = result.to_dict()
+                _record_event(
+                    execution,
+                    'tool_finished',
+                    f"Tool finished: {tool.name} ({result.status})",
+                    level=('error' if result.status == 'failed' else 'info'),
+                    tool_id=tool.id
+                )
+
+                if result.status == 'completed' and tool.provides_output:
+                    previous_outputs[tool.id] = {
+                        'output': result.output,
+                        'tool_name': tool.name,
+                        'output_format': tool.output_format
+                    }
+                    logger.info(f"✓ Tool {tool.name} completed successfully, output stored")
+                    logger.info(f"  Output size: {len(result.output)} characters")
+                    logger.info(f"  Output preview: {result.output[:200]}...")
+                else:
+                    logger.warning(f"✗ Tool {tool.name} failed or doesn't provide output: {result.status}")
+                    if result.error:
+                        logger.warning(f"  Error: {result.error[:500]}")
+
+                if result.status == 'cancelled':
+                    with execution_lock:
+                        execution.status = 'cancelled'
+                        execution.cancel_requested = True
+                        execution.cancelled_at = datetime.now().isoformat()
+                    _record_event(execution, 'execution_cancelled', 'Execution cancelled by user')
+                    logger.warning("Execution cancelled during tool execution")
+                    break
+
+            # Snapshot iteration results and metadata
+            iter_completed_at = datetime.now().isoformat()
+            iter_status = 'cancelled' if (cancel_event is not None and cancel_event.is_set()) else 'completed'
+            with execution_lock:
+                execution.iterations.append({
+                    'iteration': iteration,
+                    'started_at': iter_started_at,
+                    'completed_at': iter_completed_at,
+                    'status': iter_status,
+                    'results': iter_results_snapshot,
+                })
+                # Prevent unbounded growth in memory: keep the latest 25 iterations.
+                if len(execution.iterations) > 25:
+                    execution.iterations = execution.iterations[-25:]
+                execution.last_updated_at = _now_iso()
+
+            _record_event(execution, 'iteration_completed', f"Iteration {iteration} completed", level='info')
+
+            # Decide whether to continue
+            if mode == 'once':
                 break
+            if mode == 'repeat' and planned_iterations is not None and iteration >= planned_iterations:
+                break
+
+            # Sleep between iterations
+            if mode == 'interval':
+                sleep_s = int(interval_minutes * 60)
+                _record_event(execution, 'iteration_sleep', f"Sleeping {interval_minutes} minute(s) before next run")
+                if not _sleep_cancellable(sleep_s):
+                    continue
+            elif mode == 'repeat':
+                sleep_s = int((repeat_interval_minutes or 0) * 60)
+                _record_event(execution, 'iteration_sleep', f"Sleeping {repeat_interval_minutes or 0} minute(s) before next run")
+                if not _sleep_cancellable(sleep_s):
+                    continue
 
         # If not cancelled/failed, mark completed.
         with execution_lock:
@@ -1059,7 +1251,11 @@ def create_workflow():
             description=data['description'],
             tools=tools,
             created_at=data.get('created_at', datetime.now().isoformat()),
-            updated_at=datetime.now().isoformat()
+            updated_at=datetime.now().isoformat(),
+            run_mode=(data.get('run_mode') or 'once'),
+            interval_minutes=_int_or_none(data.get('interval_minutes')),
+            repeat_count=_int_or_none(data.get('repeat_count')),
+            repeat_interval_minutes=_int_or_none(data.get('repeat_interval_minutes')),
         )
         
         workflows_db[workflow_id] = workflow
@@ -1113,7 +1309,14 @@ def execute_workflow():
         workflow_id=workflow_id,
         domain=domain,
         status='queued',
-        results={}
+        results={},
+        run_mode=getattr(workflow, 'run_mode', 'once'),
+        interval_minutes=getattr(workflow, 'interval_minutes', None),
+        repeat_count=getattr(workflow, 'repeat_count', None),
+        repeat_interval_minutes=getattr(workflow, 'repeat_interval_minutes', None),
+        current_iteration=0,
+        planned_iterations=(getattr(workflow, 'repeat_count', None) if getattr(workflow, 'run_mode', 'once') == 'repeat' else None),
+        iterations=[]
     )
     
     execution_history[execution_id] = execution
@@ -1289,7 +1492,11 @@ def import_workflow():
             description=data.get('description', ''),
             tools=tools,
             created_at=datetime.now().isoformat(),
-            updated_at=datetime.now().isoformat()
+            updated_at=datetime.now().isoformat(),
+            run_mode=(data.get('run_mode') or 'once'),
+            interval_minutes=_int_or_none(data.get('interval_minutes')),
+            repeat_count=_int_or_none(data.get('repeat_count')),
+            repeat_interval_minutes=_int_or_none(data.get('repeat_interval_minutes')),
         )
         workflows_db[workflow.id] = workflow
 
@@ -1656,7 +1863,11 @@ def restore_settings():
                 description=workflow_data.get('description', ''),
                 tools=tools,
                 created_at=workflow_data.get('created_at', datetime.now().isoformat()),
-                updated_at=datetime.now().isoformat()
+                updated_at=datetime.now().isoformat(),
+                run_mode=(workflow_data.get('run_mode') or 'once'),
+                interval_minutes=_int_or_none(workflow_data.get('interval_minutes')),
+                repeat_count=_int_or_none(workflow_data.get('repeat_count')),
+                repeat_interval_minutes=_int_or_none(workflow_data.get('repeat_interval_minutes'))
             )
             workflows_db[workflow.id] = workflow
 
@@ -1697,7 +1908,14 @@ def restore_settings():
                     completed_at=exec_data.get('completed_at'),
                     version=exec_data.get('version', 0),
                     last_updated_at=exec_data.get('last_updated_at'),
-                    events=exec_data.get('events', [])
+                    events=exec_data.get('events', []),
+                    run_mode=(exec_data.get('run_mode') or 'once'),
+                    interval_minutes=_int_or_none(exec_data.get('interval_minutes')),
+                    repeat_count=_int_or_none(exec_data.get('repeat_count')),
+                    repeat_interval_minutes=_int_or_none(exec_data.get('repeat_interval_minutes')),
+                    current_iteration=_int_or_none(exec_data.get('current_iteration')) or 0,
+                    planned_iterations=_int_or_none(exec_data.get('planned_iterations')),
+                    iterations=exec_data.get('iterations', [])
                 )
                 execution_history[execution.execution_id] = execution
 

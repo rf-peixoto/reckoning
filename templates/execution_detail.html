@@ -45,6 +45,10 @@
       <div><strong style="color: var(--text);">Started:</strong> <span id="execStarted">{{ execution.started_at or "—" }}</span></div>
       <div><strong style="color: var(--text);">Completed:</strong> <span id="execCompleted">{{ execution.completed_at or "—" }}</span></div>
       <div><strong style="color: var(--text);">Version:</strong> <span id="execVersion">{{ execution.version }}</span></div>
+      <div><strong style="color: var(--text);">Mode:</strong> <span id="execMode">{{ execution.run_mode or 'once' }}</span></div>
+      {% if execution.run_mode != 'once' %}
+        <div><strong style="color: var(--text);">Iteration:</strong> <span id="execIter">{{ execution.current_iteration }}</span>{% if execution.planned_iterations %} / <span id="execIterPlanned">{{ execution.planned_iterations }}</span>{% endif %}</div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -294,6 +298,16 @@
       document.getElementById("execVersion").textContent = String(version);
       document.getElementById("execStarted").textContent = data.started_at || "—";
       document.getElementById("execCompleted").textContent = data.completed_at || "—";
+      const modeEl = document.getElementById("execMode");
+      if (modeEl) modeEl.textContent = String(data.run_mode || "once");
+      const iterEl = document.getElementById("execIter");
+      if (iterEl && typeof data.current_iteration !== "undefined") {
+        iterEl.textContent = String(data.current_iteration || 0);
+      }
+      const iterPlanEl = document.getElementById("execIterPlanned");
+      if (iterPlanEl && typeof data.planned_iterations !== "undefined" && data.planned_iterations !== null) {
+        iterPlanEl.textContent = String(data.planned_iterations);
+      }
       setStatusBadge(data.status || "unknown");
 
       // Update tool statuses from summaries

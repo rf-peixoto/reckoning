@@ -31,6 +31,47 @@
             <label class="form-label">Description</label>
             <textarea id="workflowDescription" class="form-control" rows="3">{{ workflow.description if workflow else 'Enter workflow description here' }}</textarea>
         </div>
+
+        <hr style="border-color: var(--border); opacity: 0.4;">
+
+        <div class="d-flex gap-20" style="flex-wrap: wrap;">
+            <div class="form-group" style="min-width: 260px; flex: 1;">
+                <label class="form-label">Execution Mode</label>
+                <select id="workflowRunMode" class="form-control" onchange="toggleWorkflowRecurrenceFields()">
+                    <option value="once" {% if workflow and workflow.run_mode == 'once' %}selected{% endif %}>Run once (default)</option>
+                    <option value="interval" {% if workflow and workflow.run_mode == 'interval' %}selected{% endif %}>Recurring (every N minutes)</option>
+                    <option value="repeat" {% if workflow and workflow.run_mode == 'repeat' %}selected{% endif %}>Run N times (sleep between runs)</option>
+                </select>
+                <div class="form-text">
+                    Default behavior is a single run. Recurring modes will keep the execution running until it finishes or is cancelled.
+                </div>
+            </div>
+
+            <div id="workflowIntervalFields" class="form-group" style="min-width: 260px; flex: 1; display: none;">
+                <label class="form-label">Interval (minutes)</label>
+                <input type="number" id="workflowIntervalMinutes" class="form-control" min="1" step="1"
+                       value="{{ workflow.interval_minutes if workflow and workflow.interval_minutes is not none else 10 }}">
+                <div class="form-text">Runs indefinitely every N minutes until cancelled.</div>
+            </div>
+
+            <div id="workflowRepeatFields" class="form-group" style="min-width: 260px; flex: 1; display: none;">
+                <label class="form-label">Repeat Settings</label>
+                <div class="d-flex gap-10" style="align-items: center;">
+                    <div style="flex: 1;">
+                        <input type="number" id="workflowRepeatCount" class="form-control" min="1" step="1"
+                               value="{{ workflow.repeat_count if workflow and workflow.repeat_count is not none else 5 }}"
+                               placeholder="Count">
+                        <div class="form-text">Runs (times)</div>
+                    </div>
+                    <div style="flex: 1;">
+                        <input type="number" id="workflowRepeatIntervalMinutes" class="form-control" min="0" step="1"
+                               value="{{ workflow.repeat_interval_minutes if workflow and workflow.repeat_interval_minutes is not none else 10 }}"
+                               placeholder="Minutes">
+                        <div class="form-text">Sleep between runs</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -112,19 +153,13 @@
                                         </div>
                                     </div>
                                     <div style="flex: 1; min-width: 250px;">
-                                        <div class="form-group">
-                                            <label class="form-label">Input Source</label>
-                                            <select class="form-control tool-input-source">
-                                                <option value="initial" {% if tool.input_source == 'initial' %}selected{% endif %}>Initial Input ({0})</option>
-                                                <option value="previous" {% if tool.input_source == 'previous' %}selected{% endif %}>Previous Tool Output</option>
-                                                <option value="specific" {% if tool.input_source == 'specific' %}selected{% endif %}>Specific Tool Output</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group tool-specific-step" {% if tool.input_source != 'specific' %}style="display: none;"{% endif %}>
-                                            <label class="form-label">Use Output from Tool #</label>
+                                        <input type="hidden" class="tool-input-source" value="specific">
+                                        <div class="form-group tool-specific-step">
+                                            <label class="form-label">Input Source Tool</label>
                                             <input type="number" class="form-control" 
-                                                   value="{{ tool.specific_step if tool.specific_step else 1 }}" 
-                                                   min="1" max="10">
+                                                   value="{% if tool.input_source == 'specific' and tool.specific_step %}{{ tool.specific_step }}{% elif tool.input_source == 'previous' %}{{ (loop.index - 1) if loop.index > 1 else 1 }}{% else %}{{ (loop.index - 1) if loop.index > 1 else 1 }}{% endif %}"
+                                                   min="1" max="50">
+                                            <div class="form-text">Select any tool step as the input source. You can still reference placeholders directly in the Arguments Template ({0}, {1}, {2}, ...).</div>
                                         </div>
                                         <div class="form-group">
                                             <label class="form-label">Description</label>
@@ -270,17 +305,11 @@
                                 </div>
                             </div>
                             <div style="flex: 1; min-width: 250px;">
-                                <div class="form-group">
-                                    <label class="form-label">Input Source</label>
-                                    <select class="form-control tool-input-source" onchange="toggleSpecificStep(this)">
-                                        <option value="initial">Initial Input ({0})</option>
-                                        <option value="previous" selected>Previous Tool Output</option>
-                                        <option value="specific">Specific Tool Output</option>
-                                    </select>
-                                </div>
-                                <div class="form-group tool-specific-step" style="display: none;">
-                                    <label class="form-label">Use Output from Tool #</label>
-                                    <input type="number" class="form-control" value="1" min="1" max="10">
+                                <input type="hidden" class="tool-input-source" value="specific">
+                                <div class="form-group tool-specific-step">
+                                    <label class="form-label">Input Source Tool</label>
+                                    <input type="number" class="form-control" value="${Math.max(1, toolCounter - 1)}" min="1" max="50">
+                                    <div class="form-text">Select any tool step as the input source. You can still reference placeholders directly in the Arguments Template ({0}, {1}, {2}, ...).</div>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label">Description</label>
@@ -365,18 +394,21 @@ function updateToolName(input, toolId) {
         // Handle enabled/disabled state
     }
     
-    function toggleSpecificStep(select) {
-        const specificStep = select.closest('.tool-node').querySelector('.tool-specific-step');
-        if (select.value === 'specific') {
-            specificStep.style.display = 'block';
-        } else {
-            specificStep.style.display = 'none';
-        }
+    function toggleWorkflowRecurrenceFields() {
+        const mode = (document.getElementById('workflowRunMode') || {}).value || 'once';
+        const intervalFields = document.getElementById('workflowIntervalFields');
+        const repeatFields = document.getElementById('workflowRepeatFields');
+        if (intervalFields) intervalFields.style.display = (mode === 'interval') ? 'block' : 'none';
+        if (repeatFields) repeatFields.style.display = (mode === 'repeat') ? 'block' : 'none';
     }
     
     function saveWorkflow() {
         const workflowName = document.getElementById('workflowName').value;
         const workflowDescription = document.getElementById('workflowDescription').value;
+        const runMode = (document.getElementById('workflowRunMode') || {}).value || 'once';
+        const intervalMinutes = parseInt((document.getElementById('workflowIntervalMinutes') || {}).value || '');
+        const repeatCount = parseInt((document.getElementById('workflowRepeatCount') || {}).value || '');
+        const repeatIntervalMinutes = parseInt((document.getElementById('workflowRepeatIntervalMinutes') || {}).value || '');
         
         const tools = [];
         const toolNodes = document.querySelectorAll('.tool-node');
@@ -387,9 +419,8 @@ function updateToolName(input, toolId) {
             const libraryToolId = (node.querySelector('.tool-library-select') || {}).value || null;
             const command = node.querySelector('.tool-command').value;
             const args = node.querySelector('.tool-args').value;
-            const inputSource = node.querySelector('.tool-input-source').value;
-            const specificStep = inputSource === 'specific' ? 
-                parseInt(node.querySelector('.tool-specific-step input').value) : null;
+            const inputSource = 'specific';
+            const specificStep = parseInt(node.querySelector('.tool-specific-step input').value || '');
             const description = node.querySelector('.tool-description').value;
             let commandOverride = null;
             let argsOverride = null;
@@ -431,7 +462,11 @@ function updateToolName(input, toolId) {
         const workflowData = {
             name: workflowName,
             description: workflowDescription,
-            tools: tools
+            tools: tools,
+            run_mode: runMode,
+            interval_minutes: (runMode === 'interval' && Number.isFinite(intervalMinutes)) ? intervalMinutes : null,
+            repeat_count: (runMode === 'repeat' && Number.isFinite(repeatCount)) ? repeatCount : null,
+            repeat_interval_minutes: (runMode === 'repeat' && Number.isFinite(repeatIntervalMinutes)) ? repeatIntervalMinutes : null
         };
         
         {% if workflow %}
@@ -463,6 +498,10 @@ function updateToolName(input, toolId) {
     function exportWorkflow() {
         const workflowName = document.getElementById('workflowName').value;
         const workflowDescription = document.getElementById('workflowDescription').value;
+        const runMode = (document.getElementById('workflowRunMode') || {}).value || 'once';
+        const intervalMinutes = parseInt((document.getElementById('workflowIntervalMinutes') || {}).value || '');
+        const repeatCount = parseInt((document.getElementById('workflowRepeatCount') || {}).value || '');
+        const repeatIntervalMinutes = parseInt((document.getElementById('workflowRepeatIntervalMinutes') || {}).value || '');
         
         const tools = [];
         const toolNodes = document.querySelectorAll('.tool-node');
@@ -472,9 +511,8 @@ function updateToolName(input, toolId) {
             const name = node.querySelector('input[type="text"]').value;
             const command = node.querySelector('.tool-command').value;
             const args = node.querySelector('.tool-args').value;
-            const inputSource = node.querySelector('.tool-input-source').value;
-            const specificStep = inputSource === 'specific' ? 
-                parseInt(node.querySelector('.tool-specific-step input').value) : null;
+            const inputSource = 'specific';
+            const specificStep = parseInt(node.querySelector('.tool-specific-step input').value || '');
             const description = node.querySelector('.tool-description').value;
             const updateCommand = node.querySelector('.tool-update-command').value;
             const color = (node.style.borderLeftColor || window.getComputedStyle(node).borderLeftColor || '#4a86e8');
@@ -498,6 +536,10 @@ function updateToolName(input, toolId) {
             name: workflowName,
             description: workflowDescription,
             tools: tools,
+            run_mode: runMode,
+            interval_minutes: (runMode === 'interval' && Number.isFinite(intervalMinutes)) ? intervalMinutes : null,
+            repeat_count: (runMode === 'repeat' && Number.isFinite(repeatCount)) ? repeatCount : null,
+            repeat_interval_minutes: (runMode === 'repeat' && Number.isFinite(repeatIntervalMinutes)) ? repeatIntervalMinutes : null,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
@@ -514,12 +556,7 @@ function updateToolName(input, toolId) {
     }
     
     document.addEventListener('DOMContentLoaded', function() {
-        const inputSources = document.querySelectorAll('.tool-input-source');
-        inputSources.forEach(select => {
-            select.addEventListener('change', function() {
-                toggleSpecificStep(this);
-            });
-        });
+        toggleWorkflowRecurrenceFields();
     });
 </script>
 {% endblock %}
