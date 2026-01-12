@@ -66,11 +66,11 @@ if not exist ".env" (
         echo FLASK_APP=app.py
         echo FLASK_ENV=development
         echo SECRET_KEY=your-secret-key-change-this-in-production
-        echo MAX_CONTENT_LENGTH=16777216
+        echo MAX_CONTENT_LENGTH=33554432
         echo.
         echo # Security Settings
-        echo SESSION_TIMEOUT=9999
-        echo MAX_EXECUTION_TIME=99999
+        echo SESSION_TIMEOUT=999999
+        echo MAX_EXECUTION_TIME=999999
         echo LOG_LEVEL=INFO
         echo.
         echo # Paths (relative to project root)

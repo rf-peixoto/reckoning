@@ -76,8 +76,8 @@ SECRET_KEY=$(openssl rand -hex 24 2>/dev/null || python3 -c "import secrets; pri
 MAX_CONTENT_LENGTH=33554432  # 32MB
 
 # Security Settings
-SESSION_TIMEOUT=9999
-MAX_EXECUTION_TIME=99999
+SESSION_TIMEOUT=999999
+MAX_EXECUTION_TIME=999999
 LOG_LEVEL=INFO
 
 # Paths (relative to project root)

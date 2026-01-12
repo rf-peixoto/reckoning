@@ -555,6 +555,50 @@ def _run_command_cancellable(execution_id: str, cmd: str, stdin_data: Optional[s
                 active_processes.pop(execution_id, None)
 
 
+def _standardize_tool_output(output: str, temp_dir: str, tool_id: str) -> Dict[str, Any]:
+    """Standardize tool outputs for safe placeholder substitution.
+
+    Rules:
+    - If the output is a single line, it is treated as a string (trailing newlines stripped).
+    - If the output has more than one line, it is written to a temporary file and the file
+      path is used as the value.
+
+    This prevents multiline outputs from being interpreted as multiple shell commands when
+    interpolated into templates (shell=True), and makes behavior consistent across tools.
+    """
+    raw = output or ""
+    trimmed = raw.rstrip("\r\n")
+    lines = trimmed.splitlines()
+
+    if len(lines) <= 1:
+        return {
+            "value": (lines[0] if lines else ""),
+            "as_file": False,
+            "file_path": None,
+            "raw": raw,
+            "line_count": len(lines),
+        }
+
+    fd, temp_path = tempfile.mkstemp(dir=temp_dir, prefix=f"out_{tool_id}_", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as f:
+            f.write(raw)
+    except Exception:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        raise
+
+    return {
+        "value": temp_path,
+        "as_file": True,
+        "file_path": temp_path,
+        "raw": raw,
+        "line_count": len(lines),
+    }
+
+
 def execute_tool(tool: ToolConfig, domain: str, previous_outputs: Dict[str, Dict[str, Any]],
                  temp_dir: str, execution_context: Dict[str, Any],
                  cancel_event: Optional[threading.Event] = None,
@@ -1091,14 +1135,26 @@ def run_workflow_thread(execution: WorkflowExecution):
                 )
 
                 if result.status == 'completed' and tool.provides_output:
+                    standardized = _standardize_tool_output(result.output, temp_dir, tool.id)
                     previous_outputs[tool.id] = {
-                        'output': result.output,
+                        # NOTE: 'output' is what gets injected into templates/placeholders.
+                        # It is either a string (single-line) or a temp file path (multi-line).
+                        'output': standardized['value'],
+                        'raw_output': standardized['raw'],
+                        'output_is_file': standardized['as_file'],
+                        'output_file_path': standardized['file_path'],
                         'tool_name': tool.name,
                         'output_format': tool.output_format
                     }
                     logger.info(f"✓ Tool {tool.name} completed successfully, output stored")
-                    logger.info(f"  Output size: {len(result.output)} characters")
-                    logger.info(f"  Output preview: {result.output[:200]}...")
+                    if standardized['as_file']:
+                        logger.info(f"  Output standardized as TEMP FILE: {standardized['file_path']}")
+                        logger.info(f"  Raw output lines: {standardized['line_count']}")
+                    else:
+                        logger.info(f"  Output standardized as STRING (single-line)")
+                    logger.info(f"  Raw output size: {len(result.output)} characters")
+                    preview = (standardized['value'] if not standardized['as_file'] else standardized['file_path'])
+                    logger.info(f"  Output value preview: {str(preview)[:200]}...")
                 else:
                     logger.warning(f"✗ Tool {tool.name} failed or doesn't provide output: {result.status}")
                     if result.error:
