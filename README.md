@@ -35,7 +35,7 @@
 
 
 ---
-**Reckoning** is sponsored by:  _the-street.xyz_, a private forum for cybersecurity, threat intelligence, and cipherpunk culture. Feel free to support us too:
+**Reckoning** is sponsored by:  _the-street.xyz_, a private forum for cybersecurity, threat intelligence, and cipherpunk culture. Feel free to support us too. Brazillian users can support us via [apoia.se](https://apoia.se/reckoning).
 ```
 Bitcoin   [BTC]     bc1qflkwmca89fzw9gfpg6dkf0es9ctnm2ktcq03dp
 ```
