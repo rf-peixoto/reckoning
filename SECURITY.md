@@ -1,5 +1,4 @@
-Dear cipherpunks. The purpose of this whole damn thing **IS TO RUN CODE ON YOUR MACHINE**. Do not report code injection vulnerabilities, mr.smart-pants. In any case, here are some recommendations for the safer execution of Reckoning:
+**Reckoning** is essentially a type of *institutionalized webshell*: a web interface for executing code on the machine. That being said, _code injection_ is not a vulnerability, but literally a feature. Please do not report similar items as security vulnerabilities. In any case, here are some instructions for the safe execution of **Reckoning**:
 
-- Reckoning is designed for researchers using their personal computers. **DO NOT RUN** in a corporate environment.
-- There are no protection mechanisms since the purpose is not for the project to be exposed or accessible on your network. **RUN ONLY ON LOCALHOST**. You are your only protection.
-- By the sacred blood of whatever God you believe in, do not report code injection vulnerabilities. :)
+- Reckoning is designed for researchers using a dedicated machine. **DO NOT RUN** in a corporate or shared environment.
+- The target audience consists of operators already familiar with security and privacy issues. Based on this, and given the project's objective *(executing code on the machine)*, **Reckoning** does not provide any protective measures against local abuse or misuse. Do not run in an exposed environment. We do not even recommend exposing it to your home local network. **Keep it only on localhost.**
