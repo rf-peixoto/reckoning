@@ -1,0 +1,612 @@
+<!-- templates/settings.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 style="color: var(--accent);">
+        <i class="fas fa-cog"></i> Application Settings
+    </h2>
+    <div>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Dashboard
+        </a>
+    </div>
+</div>
+
+
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-sliders-h"></i> Application Settings
+        </div>
+    </div>
+    <div class="card-body">
+        <form id="settingsForm">
+            <div class="d-flex gap-20" style="flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 300px;">
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" name="enable_logging" {% if settings.enable_logging %}checked{% endif %}>
+                            Enable Logging
+                        </label>
+                        <div class="form-text">Log all execution activities</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" name="auto_cleanup" {% if settings.auto_cleanup %}checked{% endif %}>
+                            Auto Cleanup
+                        </label>
+                        <div class="form-text">Automatically clean up temporary files</div>
+                    </div>
+                    
+                </div>
+                
+                <div style="flex: 1; min-width: 300px;">
+                    <div class="form-group">
+                        <label class="form-label">Max Execution Time (seconds)</label>
+                        <input type="number" class="form-control" name="max_execution_time" 
+                               value="{{ settings.max_execution_time }}" min="7" max="99999">
+                        <div class="form-text">Maximum time per tool execution</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Max Output Size (characters)</label>
+                        <input type="number" class="form-control" name="max_output_size" 
+                               value="{{ settings.max_output_size }}" min="1000" max="9999999">
+                        <div class="form-text">Maximum output size to store per tool</div>
+                    </div>
+                    
+                </div>
+            </div>
+            
+            <div class="d-flex justify-between mt-20">
+                <button type="button" onclick="resetSettings()" class="btn btn-secondary">
+                    <i class="fas fa-undo"></i> Reset to Defaults
+                </button>
+                <button type="button" onclick="saveSettings()" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Save Settings
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-database"></i> Data Management
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20" style="flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 300px;">
+                <h4 style="color: var(--accent); margin-bottom: 15px;">Backup</h4>
+                <p style="color: var(--text-muted); margin-bottom: 15px;">
+                    Create a backup of all workflows and execution history
+                </p>
+                <button onclick="createBackup()" class="btn btn-success">
+                    <i class="fas fa-save"></i> Create Backup
+                </button>
+            </div>
+            
+            <div style="flex: 1; min-width: 300px;">
+                <h4 style="color: var(--accent); margin-bottom: 15px;">Restore</h4>
+                <p style="color: var(--text-muted); margin-bottom: 15px;">
+                    Restore from a previously created backup file
+                </p>
+                <form id="restoreForm" action="{{ url_for('restore_settings') }}" method="POST" enctype="multipart/form-data">
+                    <div class="d-flex gap-10">
+                        <input type="file" name="file" accept=".json" class="form-control" style="flex: 1;">
+                        <button type="submit" class="btn btn-warning">
+                            <i class="fas fa-upload"></i> Restore
+                        </button>
+                    </div>
+                    <div class="form-group mt-10">
+                        <label class="form-label">
+                            <input type="checkbox" name="restore_executions" value="true">
+                            Restore execution history
+                        </label>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div class="alert alert-warning mt-20">
+            <i class="fas fa-exclamation-triangle"></i>
+            <strong>Warning:</strong> Restoring from backup will replace all current data. Make sure you have a current backup before restoring.
+        </div>
+    </div>
+</div>
+
+<!-- Tool Library and Wordlists configuration -->
+<div class="card mb-20">
+    <div class="card-header">
+        <h3 style="margin: 0; color: var(--accent);">
+            <i class="fas fa-toolbox"></i> Tool Library
+        </h3>
+        <div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">
+            Configure tools once. Workflows can then select a tool and optionally override fields per step.
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-10 mb-10" style="flex-wrap: wrap;">
+            <input id="tl_name" class="form-control" style="min-width: 160px; max-width: 240px;" placeholder="Name (e.g., ffuf)">
+            <input id="tl_path" class="form-control" style="min-width: 220px; flex: 1;" placeholder="Path (e.g., /usr/bin/ffuf)">
+            <input id="tl_default_cmd" class="form-control" style="min-width: 260px; flex: 2;" placeholder="Default Command (args template)">
+            <input id="tl_update_cmd" class="form-control" style="min-width: 220px; flex: 1;" placeholder="Update Command (args)">
+        </div>
+        <div class="mb-10">
+            <textarea id="tl_desc" class="form-control" rows="2" placeholder="Description"></textarea>
+        </div>
+        <div class="d-flex gap-10" style="flex-wrap: wrap;">
+            <button id="tl_submit_btn" class="btn btn-primary" onclick="addToolLibraryItem()">
+                <i id="tl_submit_icon" class="fas fa-plus"></i> <span id="tl_submit_text">Add Tool</span>
+            </button>
+            <button id="tl_cancel_btn" class="btn btn-secondary" style="display: none;" onclick="cancelEditToolLibraryItem()">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
+
+        <div class="mt-20" style="overflow-x: auto;">
+            <table class="table" style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Path</th>
+                        <th>Default Command</th>
+                        <th>Update Command</th>
+                        <th>Description</th>
+                        <th style="width: 140px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="toolLibraryTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header">
+        <h3 style="margin: 0; color: var(--accent);">
+            <i class="fas fa-list"></i> Wordlists
+        </h3>
+        <div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">
+            Define named wordlists once. Use them in tool commands/args as placeholders like <code>{wordlist1}</code>.
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-10 mb-10" style="flex-wrap: wrap;">
+            <input id="wl_name" class="form-control" style="min-width: 160px; max-width: 240px;" placeholder="Name (e.g., wordlist1)">
+            <input id="wl_path" class="form-control" style="min-width: 320px; flex: 1;" placeholder="Path (e.g., /path/to/wordlist.txt)">
+        </div>
+        <div class="d-flex gap-10" style="flex-wrap: wrap;">
+            <button id="wl_submit_btn" class="btn btn-primary" onclick="addWordlist()">
+                <i id="wl_submit_icon" class="fas fa-plus"></i> <span id="wl_submit_text">Add Wordlist</span>
+            </button>
+            <button id="wl_cancel_btn" class="btn btn-secondary" style="display: none;" onclick="cancelEditWordlist()">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
+
+        <div class="mt-20" style="overflow-x: auto;">
+            <table class="table" style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Path</th>
+                        <th style="width: 140px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="wordlistsTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-20">
+    <div class="card-header">
+        <div class="card-title">
+            <i class="fas fa-shield-alt"></i> Security Notes
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle"></i>
+            <strong>Important:</strong> This tool is for authorized security testing only. The authors are not responsible for malicious use.
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">User Notes</label>
+            <textarea class="form-control" rows="3" placeholder="Add compliance notes or authorization details..."></textarea>
+            <div class="form-text">These notes will be included in all execution logs</div>
+        </div>
+        
+        <button onclick="showComplianceInfo()" class="btn btn-primary">
+            <i class="fas fa-file-contract"></i> Terms of Use
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function saveSettings() {
+        const formData = new FormData(document.getElementById('settingsForm'));
+        const data = {};
+        formData.forEach((value, key) => {
+            if (value === 'on') {
+                data[key] = true;
+            } else if (!isNaN(value) && value !== '') {
+                data[key] = Number(value);
+            } else {
+                data[key] = value;
+            }
+        });
+        
+        fetch('/settings/update', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('Settings saved successfully!', 'success');
+            } else {
+                showAlert('Error: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            showAlert('Error: ' + error, 'danger');
+        });
+    }
+    
+    function resetSettings() {
+        if (confirm('Reset all settings to default values?')) {
+            document.getElementById('settingsForm').reset();
+            showAlert('Settings reset to defaults', 'info');
+        }
+    }
+    
+    function createBackup() {
+        fetch('/settings/backup', {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json'
+            }
+        })
+        .then(async (response) => {
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(text || ('HTTP ' + response.status));
+            }
+            const ct = response.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+                return response.json();
+            }
+            // Defensive fallback: backup may still be created even if server returned HTML.
+            return { success: true, filename: null };
+        })
+        .then(data => {
+            if (data.success) {
+                if (data.filename) {
+                    showAlert('Backup created: ' + data.filename, 'success');
+                    window.location.href = '/settings/backup?download=' + data.filename;
+                } else {
+                    showAlert('Backup created successfully.', 'success');
+                    // If no filename is available, user can retrieve it from the backups folder.
+                }
+            } else {
+                showAlert('Error creating backup: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            showAlert('Error: ' + error, 'danger');
+        });
+    }
+    
+    function showComplianceInfo() {
+        const complianceInfo = `
+        <h4>Terms of Use</h4>
+        <ul>
+            <li>You (the user) are responsible for your use of the platform. We do not collect your data, not even telemetry. Reckoning's target audience is researchers. Perform only in a protected environment and not in a publicly exposed location.</li>
+            <li>Feel free to report bugs and/or request features on Github.</li>
+        </ul>
+        `;
+        
+        // Create a modal or alert with this info
+        alert(complianceInfo.replace(/<[^>]*>/g, '')); // Simple alert version
+    }
+    
+    function showAlert(message, type) {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} mt-20`;
+        alertDiv.innerHTML = `
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'}"></i>
+            ${message}
+        `;
+        
+        const container = document.querySelector('.container');
+        container.insertBefore(alertDiv, container.firstChild);
+        
+        setTimeout(() => alertDiv.remove(), 5000);
+    }
+    
+    // Handle restore form submission
+    document.getElementById('restoreForm').addEventListener('submit', function(e) {
+        if (!confirm('WARNING: This will replace all current data. Are you sure you want to continue?')) {
+            e.preventDefault();
+            return false;
+        }
+        return true;
+    });
+
+    // --- Tool library + Wordlists ---
+    let TOOL_LIBRARY = {{ (settings.tool_library or []) | tojson }};
+    let WORDLISTS = {{ (settings.wordlists or {}) | tojson }};
+
+    // Edit state
+    let EDIT_TL_INDEX = null;
+    let EDIT_WL_NAME = null;
+
+    function renderToolLibrary() {
+        const tbody = document.getElementById('toolLibraryTable');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        TOOL_LIBRARY.forEach((t, idx) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${escapeHtml(t.name || '')}</td>
+                <td><code>${escapeHtml(t.path || '')}</code></td>
+                <td><code>${escapeHtml(t.default_command || '')}</code></td>
+                <td><code>${escapeHtml(t.update_command || '')}</code></td>
+                <td>${escapeHtml(t.description || '')}</td>
+                <td>
+                    <div class="d-flex gap-10">
+                        <button class="btn btn-secondary btn-sm" onclick="startEditToolLibraryItem(${idx})" title="Edit">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="removeToolLibraryItem(${idx})" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderWordlists() {
+        const tbody = document.getElementById('wordlistsTable');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        Object.keys(WORDLISTS).sort().forEach((name) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><code>${escapeHtml(name)}</code></td>
+                <td><code>${escapeHtml(WORDLISTS[name] || '')}</code></td>
+                <td>
+                    <div class="d-flex gap-10">
+                        <button class="btn btn-secondary btn-sm" onclick="startEditWordlist('${name.replace(/'/g, "\'")}')" title="Edit">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="removeWordlist('${name.replace(/'/g, "\'")}')" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+
+    function setToolLibraryEditMode(isEditing) {
+        const submitText = document.getElementById('tl_submit_text');
+        const submitIcon = document.getElementById('tl_submit_icon');
+        const cancelBtn = document.getElementById('tl_cancel_btn');
+        if (!submitText || !submitIcon || !cancelBtn) return;
+        if (isEditing) {
+            submitText.textContent = 'Save Tool';
+            submitIcon.className = 'fas fa-save';
+            cancelBtn.style.display = '';
+        } else {
+            submitText.textContent = 'Add Tool';
+            submitIcon.className = 'fas fa-plus';
+            cancelBtn.style.display = 'none';
+        }
+    }
+
+    function startEditToolLibraryItem(idx) {
+        const item = TOOL_LIBRARY[idx];
+        if (!item) return;
+        EDIT_TL_INDEX = idx;
+        document.getElementById('tl_name').value = item.name || '';
+        document.getElementById('tl_path').value = item.path || '';
+        document.getElementById('tl_default_cmd').value = item.default_command || '';
+        document.getElementById('tl_update_cmd').value = item.update_command || '';
+        document.getElementById('tl_desc').value = item.description || '';
+        setToolLibraryEditMode(true);
+    }
+
+    function cancelEditToolLibraryItem() {
+        EDIT_TL_INDEX = null;
+        document.getElementById('tl_name').value = '';
+        document.getElementById('tl_path').value = '';
+        document.getElementById('tl_default_cmd').value = '';
+        document.getElementById('tl_update_cmd').value = '';
+        document.getElementById('tl_desc').value = '';
+        setToolLibraryEditMode(false);
+    }
+
+    function addToolLibraryItem() {
+        const name = (document.getElementById('tl_name').value || '').trim();
+        const path = (document.getElementById('tl_path').value || '').trim();
+        const defCmd = (document.getElementById('tl_default_cmd').value || '').trim();
+        const updCmd = (document.getElementById('tl_update_cmd').value || '').trim();
+        const desc = (document.getElementById('tl_desc').value || '').trim();
+
+        if (!name || !path) {
+            alert('Tool Name and Path are required.');
+            return;
+        }
+
+        if (EDIT_TL_INDEX !== null && TOOL_LIBRARY[EDIT_TL_INDEX]) {
+            // Preserve id for stable references.
+            TOOL_LIBRARY[EDIT_TL_INDEX] = {
+                ...TOOL_LIBRARY[EDIT_TL_INDEX],
+                name: name,
+                path: path,
+                default_command: defCmd,
+                update_command: updCmd,
+                description: desc
+            };
+            EDIT_TL_INDEX = null;
+            setToolLibraryEditMode(false);
+        } else {
+            const id = 'tl_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+            TOOL_LIBRARY.push({
+                id: id,
+                name: name,
+                path: path,
+                default_command: defCmd,
+                update_command: updCmd,
+                description: desc
+            });
+        }
+
+        document.getElementById('tl_name').value = '';
+        document.getElementById('tl_path').value = '';
+        document.getElementById('tl_default_cmd').value = '';
+        document.getElementById('tl_update_cmd').value = '';
+        document.getElementById('tl_desc').value = '';
+
+        renderToolLibrary();
+        saveExtraSettings();
+    }
+
+    function removeToolLibraryItem(idx) {
+        if (EDIT_TL_INDEX !== null) {
+            if (idx === EDIT_TL_INDEX) {
+                cancelEditToolLibraryItem();
+            } else if (idx < EDIT_TL_INDEX) {
+                // Keep edit index aligned after deletion.
+                EDIT_TL_INDEX -= 1;
+            }
+        }
+        TOOL_LIBRARY.splice(idx, 1);
+        renderToolLibrary();
+        saveExtraSettings();
+    }
+
+
+    function setWordlistEditMode(isEditing) {
+        const submitText = document.getElementById('wl_submit_text');
+        const submitIcon = document.getElementById('wl_submit_icon');
+        const cancelBtn = document.getElementById('wl_cancel_btn');
+        if (!submitText || !submitIcon || !cancelBtn) return;
+        if (isEditing) {
+            submitText.textContent = 'Save Wordlist';
+            submitIcon.className = 'fas fa-save';
+            cancelBtn.style.display = '';
+        } else {
+            submitText.textContent = 'Add Wordlist';
+            submitIcon.className = 'fas fa-plus';
+            cancelBtn.style.display = 'none';
+        }
+    }
+
+    function startEditWordlist(name) {
+        if (!name || !(name in WORDLISTS)) return;
+        EDIT_WL_NAME = name;
+        document.getElementById('wl_name').value = name;
+        document.getElementById('wl_path').value = WORDLISTS[name] || '';
+        setWordlistEditMode(true);
+    }
+
+    function cancelEditWordlist() {
+        EDIT_WL_NAME = null;
+        document.getElementById('wl_name').value = '';
+        document.getElementById('wl_path').value = '';
+        setWordlistEditMode(false);
+    }
+
+    function addWordlist() {
+        const name = (document.getElementById('wl_name').value || '').trim();
+        const path = (document.getElementById('wl_path').value || '').trim();
+        if (!name || !path) {
+            alert('Wordlist Name and Path are required.');
+            return;
+        }
+        if (EDIT_WL_NAME !== null) {
+            const oldName = EDIT_WL_NAME;
+            const newName = name;
+            if (!oldName || !(oldName in WORDLISTS)) {
+                // Edit target vanished; fall back to add.
+                EDIT_WL_NAME = null;
+            } else {
+                if (newName !== oldName && (newName in WORDLISTS)) {
+                    alert('A wordlist with that name already exists. Choose a different name.');
+                    return;
+                }
+                const val = path;
+                delete WORDLISTS[oldName];
+                WORDLISTS[newName] = val;
+                EDIT_WL_NAME = null;
+                setWordlistEditMode(false);
+            }
+        } else {
+            WORDLISTS[name] = path;
+        }
+        document.getElementById('wl_name').value = '';
+        document.getElementById('wl_path').value = '';
+        renderWordlists();
+        saveExtraSettings();
+    }
+
+    function removeWordlist(name) {
+        if (EDIT_WL_NAME !== null && name === EDIT_WL_NAME) {
+            cancelEditWordlist();
+        }
+        delete WORDLISTS[name];
+        renderWordlists();
+        saveExtraSettings();
+    }
+
+    function saveExtraSettings() {
+        // Merge with current settings already displayed on page by submitting only the new keys
+        fetch('{{ url_for("update_settings") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool_library: TOOL_LIBRARY,
+                wordlists: WORDLISTS
+            })
+        }).then(r => r.json()).then((data) => {
+            if (!data.success) {
+                console.error(data);
+                alert('Failed to save tool library/wordlists: ' + (data.error || 'unknown error'));
+            }
+        }).catch((e) => {
+            console.error(e);
+            alert('Failed to save tool library/wordlists.');
+        });
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        renderToolLibrary();
+        renderWordlists();
+        setToolLibraryEditMode(false);
+        setWordlistEditMode(false);
+    });
+</script>
+{% endblock %}

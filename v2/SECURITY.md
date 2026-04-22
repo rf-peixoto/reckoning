@@ -1,0 +1,4 @@
+**Reckoning** is essentially a type of *institutionalized webshell*: a web interface for executing code on the machine. That being said, _code injection_ is not a vulnerability, but literally a feature. Please do not report similar items as security vulnerabilities. In any case, here are some instructions for the safe execution of **Reckoning**:
+
+- Reckoning is designed for researchers using a dedicated machine. **DO NOT RUN** in a corporate or shared environment.
+- The target audience consists of operators already familiar with security and privacy issues. Based on this, and given the project's objective *(executing code on the machine)*, **Reckoning** does not provide any protective measures against local abuse or misuse. Do not run in an exposed environment. We do not even recommend exposing it to your home local network. **Keep it only on localhost.**
