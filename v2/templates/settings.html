@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 class="page-title" style="color: var(--accent);">Settings</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Dashboard</a>
+</div>
+
+<!-- Core settings -->
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-sliders-h"></i> Application Settings</div>
+    </div>
+    <div class="card-body">
+        <form id="settingsForm">
+            <div class="d-flex gap-20 flex-wrap">
+                <div style="flex:1; min-width:280px;">
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" name="enable_logging" {% if settings.enable_logging %}checked{% endif %}>
+                            Enable Logging
+                        </label>
+                        <div class="form-text">Write execution events to logs/app.log</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" name="auto_cleanup" {% if settings.auto_cleanup %}checked{% endif %}>
+                            Auto Cleanup Temp Files
+                        </label>
+                        <div class="form-text">Delete per-execution temp directories when done</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Log Retention (days, 0 = keep forever)</label>
+                        <input type="number" class="form-control" name="log_retention_days"
+                               value="{{ settings.log_retention_days }}" min="0">
+                        <div class="form-text">Log files older than this are purged daily</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Execution History Retention (days, 0 = keep forever)</label>
+                        <input type="number" class="form-control" name="execution_retention_days"
+                               value="{{ settings.execution_retention_days }}" min="0">
+                        <div class="form-text">Completed/failed executions older than this are deleted automatically (hourly check)</div>
+                    </div>
+                </div>
+                <div style="flex:1; min-width:280px;">
+                    <div class="form-group">
+                        <label class="form-label">Global Max Execution Time (seconds)</label>
+                        <input type="number" class="form-control" name="max_execution_time"
+                               value="{{ settings.max_execution_time }}" min="5" max="99999">
+                        <div class="form-text">Per-tool default. Can be overridden per step in the workflow editor.</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Max Output Size (characters)</label>
+                        <input type="number" class="form-control" name="max_output_size"
+                               value="{{ settings.max_output_size }}" min="1000">
+                        <div class="form-text">Output exceeding this is truncated</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Output Directory</label>
+                        <input type="text" class="form-control" name="output_directory"
+                               value="{{ settings.output_directory }}" placeholder="exports">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Temp Directory (empty = system default)</label>
+                        <input type="text" class="form-control" name="temp_directory"
+                               value="{{ settings.temp_directory }}" placeholder="/tmp">
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex justify-between mt-20">
+                <button type="button" onclick="resetSettings()" class="btn btn-secondary"><i class="fas fa-undo"></i> Defaults</button>
+                <button type="button" onclick="saveSettings()" class="btn btn-primary"><i class="fas fa-save"></i> Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Data management -->
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-database"></i> Data Management</div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20 flex-wrap">
+            <div style="flex:1; min-width:280px;">
+                <div style="color:var(--accent-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px;">Backup</div>
+                <p style="color:var(--text-muted); font-size:12px; margin-bottom:12px;">
+                    Creates a binary copy of <code>reckoning.db</code> (SQLite backup API — safe for a live database).
+                </p>
+                <button onclick="createBackup()" class="btn btn-success"><i class="fas fa-save"></i> Download Backup</button>
+            </div>
+            <div style="flex:1; min-width:280px;">
+                <div style="color:var(--accent-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px;">Restore</div>
+                <p style="color:var(--text-muted); font-size:12px; margin-bottom:12px;">
+                    Upload a <code>.db</code> backup file. The app must be restarted for the restored data to take full effect.
+                </p>
+                <form id="restoreForm" action="{{ url_for('restore_settings') }}" method="POST" enctype="multipart/form-data"
+                      onsubmit="return confirm('Replace ALL current data with the backup? This cannot be undone.')">
+                    <div class="d-flex gap-10">
+                        <input type="file" name="file" accept=".db" class="form-control" style="flex:1;">
+                        <button type="submit" class="btn btn-warning"><i class="fas fa-upload"></i> Restore</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div class="alert alert-warning mt-20">
+            Restoring a backup replaces all current workflows and executions. Create a fresh backup first if needed.
+        </div>
+    </div>
+</div>
+
+<!-- Tool Library -->
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-toolbox"></i> Tool Library</div>
+        <div style="color:var(--text-muted); font-size:11px; margin-top:4px;">
+            Configure tools once — workflows reference them by name and can override individual fields per step.
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-10 mb-10 flex-wrap">
+            <input id="tl_name"        class="form-control" style="min-width:140px; max-width:200px;" placeholder="Name (e.g. nuclei)">
+            <input id="tl_path"        class="form-control" style="flex:1; min-width:200px;" placeholder="Path (e.g. /usr/bin/nuclei)">
+            <input id="tl_default_cmd" class="form-control" style="flex:2; min-width:220px;" placeholder="Default Args (e.g. -l {subdomains})">
+            <input id="tl_update_cmd"  class="form-control" style="flex:1; min-width:160px;" placeholder="Update Args (e.g. -update)">
+        </div>
+        <div class="mb-10">
+            <textarea id="tl_desc" class="form-control" rows="1" placeholder="Description"></textarea>
+        </div>
+        <div class="d-flex gap-10">
+            <button id="tl_submit_btn" class="btn btn-primary" onclick="addTLItem()">
+                <i id="tl_icon" class="fas fa-plus"></i> <span id="tl_text">Add Tool</span>
+            </button>
+            <button id="tl_cancel_btn" class="btn btn-secondary" style="display:none;" onclick="cancelTLEdit()">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
+        <div class="table-responsive mt-20">
+            <table class="table">
+                <thead>
+                    <tr><th>Name</th><th>Path</th><th>Default Args</th><th>Update Args</th><th>Description</th><th style="width:110px;"></th></tr>
+                </thead>
+                <tbody id="tlTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- String Library -->
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-key"></i> String Library</div>
+        <div style="color:var(--text-muted); font-size:11px; margin-top:4px;">
+            Named reusable strings — wordlists, API keys, tokens, domains, or any value you reference repeatedly.
+            Use as <code>{name}</code> in any arguments template.
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-10 mb-10 flex-wrap">
+            <input id="wl_name" class="form-control" style="min-width:160px; max-width:220px;" placeholder="Name (e.g. api_key, passwords)">
+            <input id="wl_path" class="form-control" style="flex:1; min-width:240px;" placeholder="Value or path (e.g. /opt/wordlists/rockyou.txt or sk-abc123)">
+        </div>
+        <div class="d-flex gap-10">
+            <button id="wl_submit_btn" class="btn btn-primary" onclick="addWL()">
+                <i id="wl_icon" class="fas fa-plus"></i> <span id="wl_text">Add Entry</span>
+            </button>
+            <button id="wl_cancel_btn" class="btn btn-secondary" style="display:none;" onclick="cancelWLEdit()">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
+        <div class="table-responsive mt-20">
+            <table class="table">
+                <thead><tr><th>Name</th><th>Value / Path</th><th style="width:110px;"></th></tr></thead>
+                <tbody id="wlTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Core settings ─────────────────────────────────────────────
+function saveSettings() {
+    const form = document.getElementById('settingsForm');
+    const data = {};
+    form.querySelectorAll('[name]').forEach(el => {
+        const k = el.name;
+        if (el.type === 'checkbox') { data[k] = el.checked; }
+        else if (el.value !== '' && !isNaN(el.value) && el.type === 'number') { data[k] = Number(el.value); }
+        else { data[k] = el.value; }
+    });
+    fetch('/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) })
+        .then(r=>r.json()).then(d => {
+            showAlert(d.success ? 'Settings saved.' : 'Error: '+(d.error||'unknown'), d.success?'success':'danger');
+        }).catch(e => showAlert('Error: '+e, 'danger'));
+}
+
+function resetSettings() {
+    if (confirm('Reset form fields to defaults? (Settings are not saved yet.)')) {
+        document.getElementById('settingsForm').reset();
+    }
+}
+
+async function createBackup() {
+    const resp = await fetch('/settings/backup', { method:'POST', headers:{'Accept':'application/json'} });
+    if (resp.ok && resp.headers.get('content-type')?.includes('application/json')) {
+        const d = await resp.json();
+        if (d.success) showAlert('Backup created: ' + d.filename, 'success');
+        else showAlert('Backup failed: ' + d.error, 'danger');
+    } else if (resp.ok) {
+        // Server sent a file download directly
+        const blob = await resp.blob();
+        const cd = resp.headers.get('content-disposition') || '';
+        const fn = (cd.match(/filename="?([^"]+)"?/) || ['','reckoning_backup.db'])[1];
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fn;
+        a.click();
+    } else {
+        showAlert('Backup failed (HTTP ' + resp.status + ')', 'danger');
+    }
+}
+
+// ── Tool Library ──────────────────────────────────────────────
+let TL = {{ (settings.tool_library or []) | tojson }};
+let TL_EDIT = null;
+
+function renderTL() {
+    const tbody = document.getElementById('tlTable');
+    tbody.innerHTML = '';
+    TL.forEach((t, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${esc(t.name)}</td><td><code>${esc(t.path)}</code></td><td><code>${esc(t.default_command||'')}</code></td><td><code>${esc(t.update_command||'')}</code></td><td>${esc(t.description||'')}</td>
+        <td><div class="d-flex gap-10">
+            <button class="btn btn-secondary btn-sm" onclick="editTL(${i})"><i class="fas fa-pen"></i></button>
+            <button class="btn btn-danger btn-sm" onclick="deleteTL(${i})"><i class="fas fa-trash"></i></button>
+        </div></td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+function editTL(i) {
+    const t = TL[i]; TL_EDIT = i;
+    document.getElementById('tl_name').value        = t.name||'';
+    document.getElementById('tl_path').value        = t.path||'';
+    document.getElementById('tl_default_cmd').value = t.default_command||'';
+    document.getElementById('tl_update_cmd').value  = t.update_command||'';
+    document.getElementById('tl_desc').value        = t.description||'';
+    document.getElementById('tl_text').textContent  = 'Save Tool';
+    document.getElementById('tl_icon').className    = 'fas fa-save';
+    document.getElementById('tl_cancel_btn').style.display = '';
+}
+
+function cancelTLEdit() {
+    TL_EDIT = null;
+    ['tl_name','tl_path','tl_default_cmd','tl_update_cmd','tl_desc'].forEach(id => document.getElementById(id).value='');
+    document.getElementById('tl_text').textContent = 'Add Tool';
+    document.getElementById('tl_icon').className   = 'fas fa-plus';
+    document.getElementById('tl_cancel_btn').style.display = 'none';
+}
+
+function addTLItem() {
+    const name = document.getElementById('tl_name').value.trim();
+    const path = document.getElementById('tl_path').value.trim();
+    if (!name || !path) { alert('Name and Path are required.'); return; }
+    const entry = {
+        id: TL_EDIT !== null ? TL[TL_EDIT].id : ('tl_'+Date.now()+'_'+Math.random().toString(16).slice(2)),
+        name, path,
+        default_command: document.getElementById('tl_default_cmd').value.trim(),
+        update_command:  document.getElementById('tl_update_cmd').value.trim(),
+        description:     document.getElementById('tl_desc').value.trim()
+    };
+    if (TL_EDIT !== null) TL[TL_EDIT] = entry;
+    else TL.push(entry);
+    cancelTLEdit();
+    renderTL();
+    saveTLWL();
+}
+
+function deleteTL(i) {
+    if (TL_EDIT === i) cancelTLEdit();
+    TL.splice(i,1); renderTL(); saveTLWL();
+}
+
+// ── Wordlists ─────────────────────────────────────────────────
+let WL = {{ (settings.wordlists or {}) | tojson }};
+let WL_EDIT = null;
+
+function renderWL() {
+    const tbody = document.getElementById('wlTable');
+    tbody.innerHTML = '';
+    Object.keys(WL).sort().forEach(name => {
+        const tr = document.createElement('tr');
+        const safeName = name.replace(/'/g,"\\'");
+        tr.innerHTML = `<td><code>${esc(name)}</code></td><td><code>${esc(WL[name])}</code></td>
+        <td><div class="d-flex gap-10">
+            <button class="btn btn-secondary btn-sm" onclick="editWL('${safeName}')"><i class="fas fa-pen"></i></button>
+            <button class="btn btn-danger btn-sm" onclick="deleteWL('${safeName}')"><i class="fas fa-trash"></i></button>
+        </div></td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+function editWL(name) {
+    WL_EDIT = name;
+    document.getElementById('wl_name').value = name;
+    document.getElementById('wl_path').value = WL[name]||'';
+    document.getElementById('wl_text').textContent = 'Save Entry';
+    document.getElementById('wl_icon').className   = 'fas fa-save';
+    document.getElementById('wl_cancel_btn').style.display = '';
+}
+
+function cancelWLEdit() {
+    WL_EDIT = null;
+    document.getElementById('wl_name').value = '';
+    document.getElementById('wl_path').value = '';
+    document.getElementById('wl_text').textContent = 'Add Entry';
+    document.getElementById('wl_icon').className   = 'fas fa-plus';
+    document.getElementById('wl_cancel_btn').style.display = 'none';
+}
+
+function addWL() {
+    const name = document.getElementById('wl_name').value.trim();
+    const path = document.getElementById('wl_path').value.trim();
+    if (!name || !path) { alert('Name and Path are required.'); return; }
+    if (WL_EDIT && WL_EDIT !== name) delete WL[WL_EDIT];
+    WL[name] = path;
+    cancelWLEdit(); renderWL(); saveTLWL();
+}
+
+function deleteWL(name) {
+    if (WL_EDIT === name) cancelWLEdit();
+    delete WL[name]; renderWL(); saveTLWL();
+}
+
+function saveTLWL() {
+    fetch('/settings', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tool_library: TL, wordlists: WL })
+    }).then(r=>r.json()).then(d=>{
+        if (!d.success) console.error('saveTLWL failed', d);
+    }).catch(console.error);
+}
+
+function esc(s) {
+    return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.addEventListener('DOMContentLoaded', () => { renderTL(); renderWL(); });
+</script>
+{% endblock %}

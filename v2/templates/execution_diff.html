@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 class="page-title" style="color: var(--accent);">Output Diff</h2>
+    <a href="{{ url_for('executions_list') }}" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back</a>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-code-compare"></i> Comparing executions — {{ workflow_name }}</div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20 flex-wrap" style="font-size:12px;">
+            <div style="flex:1; min-width:240px; padding:10px; border:1px solid var(--border-light);">
+                <div style="color:var(--danger); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">─ A (older)</div>
+                <div><span style="color:var(--text-muted);">ID</span> <code>{{ exec_a.execution_id[:8] }}…</code></div>
+                <div><span style="color:var(--text-muted);">Target</span> <code>{{ exec_a.domain }}</code></div>
+                <div><span style="color:var(--text-muted);">Run</span> {{ exec_a.created_at[:16].replace('T',' ') }}</div>
+            </div>
+            <div style="display:flex; align-items:center; padding:0 8px; color:var(--accent-dim); font-size:20px;">→</div>
+            <div style="flex:1; min-width:240px; padding:10px; border:1px solid var(--border-light);">
+                <div style="color:var(--success); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">+ B (newer)</div>
+                <div><span style="color:var(--text-muted);">ID</span> <code>{{ exec_b.execution_id[:8] }}…</code></div>
+                <div><span style="color:var(--text-muted);">Target</span> <code>{{ exec_b.domain }}</code></div>
+                <div><span style="color:var(--text-muted);">Run</span> {{ exec_b.created_at[:16].replace('T',' ') }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% for tool in tool_order %}
+{% set d = diffs[tool.id] if tool.id in diffs else None %}
+<div class="card mb-20">
+    <div class="card-header d-flex justify-between align-center">
+        <div class="card-title" style="border-left:3px solid {{ tool.color or 'var(--accent)' }}; padding-left:8px;">
+            {{ tool.name }}
+        </div>
+        {% if d %}
+        <div class="d-flex gap-10" style="font-size:12px;">
+            {% if d.added %}
+            <span style="color:var(--success);">+{{ d.added }} added</span>
+            {% endif %}
+            {% if d.removed %}
+            <span style="color:var(--danger);">-{{ d.removed }} removed</span>
+            {% endif %}
+            {% if d.added == 0 and d.removed == 0 %}
+            <span style="color:var(--text-muted);">no changes</span>
+            {% endif %}
+            <span style="color:var(--text-muted);">A:{{ d.lines_a }}L → B:{{ d.lines_b }}L</span>
+        </div>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        {% if d is none %}
+        <span style="color:var(--text-muted); font-size:12px;">No result data for this tool in one or both executions.</span>
+        {% elif d.diff_lines %}
+        <pre class="code-block" style="max-height:500px; overflow:auto; font-size:12px; line-height:1.5;">{% for line in d.diff_lines %}{% if line.startswith('+++') or line.startswith('---') %}<span class="diff-header">{{ line | e }}</span>{% elif line.startswith('@@') %}<span class="diff-header" style="opacity:0.6;">{{ line | e }}</span>{% elif line.startswith('+') %}<span class="diff-added">{{ line | e }}</span>{% elif line.startswith('-') %}<span class="diff-removed">{{ line | e }}</span>{% else %}{{ line | e }}{% endif %}
+{% endfor %}</pre>
+        {% else %}
+        <div style="color:var(--success); font-size:12px; padding:8px;">
+            <i class="fas fa-check-circle"></i> Outputs are identical ({{ d.lines_a }} lines)
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 class="page-title" style="color: var(--accent);">Execution History</h2>
+    <div class="d-flex gap-10">
+        <button id="diffBtn" onclick="openDiff()" class="btn btn-secondary" style="display:none;">
+            <i class="fas fa-code-compare"></i> Compare Selected
+        </button>
+        <button onclick="clearAllExecutions()" class="btn btn-danger">
+            <i class="fas fa-trash"></i> Clear All
+        </button>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-chart-bar"></i> Statistics</div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20 flex-wrap">
+            {% set total     = executions|length %}
+            {% set completed = executions|selectattr('status','equalto','completed')|list|length %}
+            {% set failed    = executions|selectattr('status','equalto','failed')|list|length %}
+            {% set running   = executions|selectattr('status','in',['running','queued','cancelling'])|list|length %}
+            {% set scheduled = executions|selectattr('status','equalto','scheduled')|list|length %}
+            {% for label, val, color in [
+                ('Total',     total,     'var(--accent)'),
+                ('Completed', completed, 'var(--success)'),
+                ('Failed',    failed,    'var(--danger)'),
+                ('Active',    running,   'var(--info)'),
+                ('Scheduled', scheduled, 'var(--warning)'),
+            ] %}
+            <div style="flex:1; min-width:120px; text-align:center; padding:10px; border:1px solid var(--border-light);">
+                <div style="font-size:28px; color:{{ color }}; font-weight:bold;">{{ val }}</div>
+                <div style="color:var(--text-muted); font-size:12px; text-transform:uppercase; letter-spacing:0.08em;">{{ label }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-between align-center">
+        <div class="card-title"><i class="fas fa-list"></i> All Executions</div>
+        <div style="color:var(--text-muted); font-size:11px;">Select two executions with the same workflow+target to compare outputs.</div>
+    </div>
+    <div class="card-body">
+        {% if executions %}
+        <div class="table-responsive">
+            <table class="table" id="execTable">
+                <thead>
+                    <tr>
+                        <th style="width:36px;"></th>
+                        <th>ID</th>
+                        <th>Workflow</th>
+                        <th>Target</th>
+                        <th>Notes</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for ex in executions %}
+                <tr data-id="{{ ex.execution_id }}" data-workflow="{{ ex.workflow_id }}" data-domain="{{ ex.domain }}">
+                    <td>
+                        {% if ex.status == 'completed' %}
+                        <input type="checkbox" class="diff-check" onchange="updateDiffBtn()"
+                               data-id="{{ ex.execution_id }}"
+                               data-workflow="{{ ex.workflow_id }}"
+                               data-domain="{{ ex.domain }}">
+                        {% endif %}
+                    </td>
+                    <td>
+                        <code style="font-size:11px;">{{ ex.execution_id[:8] }}…</code>
+                        {% if ex.run_mode and ex.run_mode != 'once' %}
+                        <span class="status-badge status-pending" style="margin-left:4px; font-size:10px;">{{ ex.run_mode }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ ex.workflow_name }}</td>
+                    <td style="font-family:monospace;">{{ ex.domain }}</td>
+                    <td style="color:var(--text-muted); font-size:12px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ ex.notes }}">
+                        {{ ex.notes or '—' }}
+                    </td>
+                    <td>
+                        <span class="status-badge status-{{ ex.status }}">
+                            {% if ex.status == 'scheduled' and ex.scheduled_at %}
+                                ⏰ {{ ex.scheduled_at[:16].replace('T',' ') }}
+                            {% else %}
+                                {{ ex.status }}
+                            {% endif %}
+                        </span>
+                    </td>
+                    <td style="color:var(--text-muted); font-size:12px;">
+                        {{ ex.started_at[:16].replace('T',' ') if ex.started_at else '—' }}
+                    </td>
+                    <td style="color:var(--text-muted); font-size:12px;">{{ ex.duration_human }}</td>
+                    <td>
+                        <div class="d-flex gap-10">
+                            {% if ex.status in ['queued','running','cancelling','scheduled'] %}
+                            <form action="{{ url_for('cancel_execution', execution_id=ex.execution_id) }}" method="POST" style="display:inline;">
+                                <button type="submit" class="btn btn-warning btn-sm" title="Cancel">
+                                    <i class="fas fa-stop"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                            <a href="{{ url_for('execution_status', execution_id=ex.execution_id) }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                            <a href="{{ url_for('export_execution', execution_id=ex.execution_id) }}" class="btn btn-success btn-sm">
+                                <i class="fas fa-download"></i>
+                            </a>
+                            <form action="{{ url_for('delete_execution', execution_id=ex.execution_id) }}" method="POST" style="display:inline;"
+                                  onsubmit="return confirm('Delete this execution?')">
+                                <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i></button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center" style="padding:40px;">
+            <i class="fas fa-terminal" style="font-size:48px; color:var(--text-muted); margin-bottom:16px;"></i>
+            <p style="color:var(--text-muted);">No executions yet. Run a workflow from the Dashboard.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateDiffBtn() {
+    const checked = Array.from(document.querySelectorAll('.diff-check:checked'));
+    const btn = document.getElementById('diffBtn');
+    btn.style.display = checked.length === 2 ? '' : 'none';
+    // Warn if mismatched
+    if (checked.length === 2) {
+        const [a, b] = checked;
+        if (a.dataset.workflow !== b.dataset.workflow || a.dataset.domain !== b.dataset.domain) {
+            btn.title = '⚠ Different workflow or target — comparison may not be meaningful';
+            btn.classList.add('btn-warning');
+            btn.classList.remove('btn-secondary');
+        } else {
+            btn.title = 'Compare outputs of these two executions';
+            btn.classList.remove('btn-warning');
+            btn.classList.add('btn-secondary');
+        }
+    }
+    // Limit to 2
+    if (checked.length > 2) {
+        checked[0].checked = false;
+        updateDiffBtn();
+    }
+}
+
+function openDiff() {
+    const checked = Array.from(document.querySelectorAll('.diff-check:checked'));
+    if (checked.length !== 2) return;
+    window.location.href = `/execution/diff?a=${checked[0].dataset.id}&b=${checked[1].dataset.id}`;
+}
+
+async function clearAllExecutions() {
+    if (!confirm('Delete ALL execution history? This cannot be undone.')) return;
+    const resp = await fetch('/execution/clear_all', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true })
+    });
+    const data = await resp.json();
+    if (data.success) { showAlert(data.message, 'success'); setTimeout(() => location.reload(), 800); }
+    else showAlert('Error: ' + data.error, 'danger');
+}
+
+// Auto-refresh when active executions exist
+const hasActive = {{ 'true' if executions|selectattr('status','in',['running','queued','cancelling'])|list|length > 0 else 'false' }};
+if (hasActive) setTimeout(() => location.reload(), 10000);
+</script>
+{% endblock %}

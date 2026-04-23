@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 class="page-title" style="color: var(--accent);">Execution Detail</h2>
+    <div class="d-flex gap-10">
+        <form id="cancelForm" action="{{ url_for('cancel_execution', execution_id=execution.execution_id) }}"
+              method="POST" style="display:{{ 'inline' if execution.status in ['queued','running','cancelling','scheduled'] else 'none' }};">
+            <button type="submit" class="btn btn-warning"><i class="fas fa-stop"></i> Cancel</button>
+        </form>
+        <a href="{{ url_for('executions_list') }}" class="btn btn-secondary"><i class="fas fa-history"></i> History</a>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary"><i class="fas fa-home"></i> Dashboard</a>
+    </div>
+</div>
+
+<!-- Summary card -->
+<div class="card mb-20">
+    <div class="card-header d-flex justify-between align-center">
+        <div>
+            <div style="font-size:16px; font-weight:bold; color:var(--text);">{{ execution.workflow_name }}</div>
+            <div style="color:var(--text-muted); font-size:12px;">{{ execution.workflow_description }}</div>
+        </div>
+        <span id="execStatusBadge" class="status-badge status-{{ execution.status }}">
+            {{ execution.status }}
+        </span>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20 flex-wrap" style="font-size:12px; color:var(--text-muted);">
+            <div><span style="color:var(--accent-dim);">ID</span> <code>{{ execution.execution_id }}</code></div>
+            <div><span style="color:var(--accent-dim);">Target</span> <code>{{ execution.domain }}</code></div>
+            <div><span style="color:var(--accent-dim);">Mode</span> <span id="execMode">{{ execution.run_mode or 'once' }}</span></div>
+            {% if execution.run_mode and execution.run_mode != 'once' %}
+            <div><span style="color:var(--accent-dim);">Iteration</span> <span id="execIter">{{ execution.current_iteration }}</span>{% if execution.planned_iterations %}/<span id="execIterPlan">{{ execution.planned_iterations }}</span>{% endif %}</div>
+            {% endif %}
+            {% if execution.scheduled_at %}
+            <div><span style="color:var(--accent-dim);">Scheduled</span> {{ execution.scheduled_at[:16].replace('T',' ') }}</div>
+            {% endif %}
+            <div><span style="color:var(--accent-dim);">Created</span> {{ execution.created_at[:16].replace('T',' ') }}</div>
+            <div><span style="color:var(--accent-dim);">Started</span> <span id="execStarted">{{ execution.started_at[:16].replace('T',' ') if execution.started_at else '—' }}</span></div>
+            <div><span style="color:var(--accent-dim);">Finished</span> <span id="execCompleted">{{ execution.completed_at[:16].replace('T',' ') if execution.completed_at else '—' }}</span></div>
+        </div>
+        {% if execution.notes %}
+        <div style="margin-top:12px; padding:10px; border-left:3px solid var(--accent-dim); background:var(--primary); font-size:12px; color:var(--text-muted);">
+            <span style="color:var(--accent-dim);">NOTES</span> {{ execution.notes }}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Live output stream (visible while running) -->
+<div id="livePanel" class="card mb-20" style="display:{{ 'block' if execution.status in ['running','queued'] else 'none' }};">
+    <div class="card-header d-flex justify-between align-center">
+        <div class="card-title"><i class="fas fa-satellite-dish pulse"></i> Live Output</div>
+        <div class="d-flex gap-10">
+            <button id="liveToggleBtn" onclick="toggleLiveFeed()" class="btn btn-secondary btn-sm">
+                <i class="fas fa-eye-slash"></i> Hide
+            </button>
+            <button onclick="clearLive()" class="btn btn-secondary btn-sm"><i class="fas fa-eraser"></i> Clear</button>
+        </div>
+    </div>
+    <div id="liveFeedWrap" class="card-body">
+        <pre id="liveOutput" class="code-block" style="max-height:320px; overflow-y:auto; font-size:12px; white-space:pre-wrap; margin:0;"></pre>
+    </div>
+</div>
+
+<!-- Tools -->
+<div class="card mb-20">
+    <div class="card-header d-flex justify-between align-center">
+        <div class="card-title"><i class="fas fa-tools"></i> Tools</div>
+        <span style="color:var(--text-muted); font-size:11px;">Outputs loaded on demand.</span>
+    </div>
+    <div class="card-body" id="toolsContainer">
+        {% for tool in tool_order %}
+        <div class="tool-card mb-10" style="background:var(--primary); border:1px solid var(--border-light); border-left:3px solid {{ tool.color or 'var(--accent)' }}; padding:12px; border-radius:2px;">
+            <div class="d-flex justify-between align-center">
+                <div>
+                    <span style="font-weight:bold; color:var(--text);">{{ tool.name }}</span>
+                    {% if not tool.enabled %}<span class="status-badge status-pending" style="margin-left:8px; font-size:10px;">disabled</span>{% endif %}
+                    {% if tool.description %}<div style="color:var(--text-muted); font-size:11px; margin-top:2px;">{{ tool.description }}</div>{% endif %}
+                </div>
+                <div class="d-flex gap-10 align-center">
+                    <span class="status-badge status-pending" id="toolStatus_{{ tool.id }}">pending</span>
+                    <button class="btn btn-secondary btn-sm" onclick="toggleOutput('{{ tool.id }}')" id="btn_{{ tool.id }}" disabled>
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                </div>
+            </div>
+            <div id="outputWrap_{{ tool.id }}" style="display:none; margin-top:10px;">
+                <div class="d-flex justify-between align-center mb-10">
+                    <span id="meta_{{ tool.id }}" style="font-size:11px; color:var(--text-muted);"></span>
+                    <button class="btn btn-secondary btn-sm" onclick="loadOutput('{{ tool.id }}')"><i class="fas fa-rotate"></i> Refresh</button>
+                </div>
+                <div class="d-flex gap-10 flex-wrap">
+                    <div style="flex:1; min-width:260px;">
+                        <div style="font-size:11px; color:var(--accent-dim); margin-bottom:4px;">STDOUT</div>
+                        <pre class="code-block" id="stdout_{{ tool.id }}" style="max-height:360px; overflow:auto; font-size:12px;"></pre>
+                    </div>
+                    <div style="flex:1; min-width:260px;">
+                        <div style="font-size:11px; color:var(--accent-dim); margin-bottom:4px;">STDERR</div>
+                        <pre class="code-block" id="stderr_{{ tool.id }}" style="max-height:360px; overflow:auto; font-size:12px;"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Event trail -->
+<div class="card mb-20">
+    <div class="card-header d-flex justify-between align-center">
+        <div class="card-title"><i class="fas fa-stream"></i> Event Trail</div>
+        <button class="btn btn-secondary btn-sm" onclick="refreshEvents()"><i class="fas fa-rotate"></i></button>
+    </div>
+    <div class="card-body">
+        <pre id="eventsBox" class="code-block" style="max-height:260px; overflow-y:auto; font-size:11px;"></pre>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const executionId = "{{ execution.execution_id }}";
+const toolCache = {};  // tool_id -> { sha_out, sha_err }
+let lastVersion = {{ execution.version or 0 }};
+let pollDelay   = 1500;
+let pollTimer   = null;
+let sseSource   = null;
+
+// ── Live feed toggle ─────────────────────────────────────────
+let liveFeedHidden = false;
+
+function toggleLiveFeed() {
+    liveFeedHidden = !liveFeedHidden;
+    const wrap = document.getElementById('liveFeedWrap');
+    const btn  = document.getElementById('liveToggleBtn');
+
+    if (liveFeedHidden) {
+        // Pause: hide panel, stop SSE, wipe buffer
+        wrap.style.display = 'none';
+        btn.innerHTML = '<i class="fas fa-eye"></i> Show';
+        stopSSE();
+        clearLive();
+    } else {
+        // Resume: show panel, reconnect SSE
+        wrap.style.display = '';
+        btn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide';
+        // Only reconnect if execution is still active
+        const badge = document.getElementById('execStatusBadge');
+        const status = badge ? badge.textContent.trim() : '';
+        if (['queued','running','cancelling'].includes(status)) {
+            startSSE();
+        }
+    }
+}
+
+// ── Status badge ─────────────────────────────────────────────
+const STATUS_COLORS = {
+    queued:'var(--info)', scheduled:'var(--warning)', running:'var(--info)',
+    cancelling:'var(--warning)', completed:'var(--success)', failed:'var(--danger)',
+    cancelled:'var(--text-muted)'
+};
+function setStatusBadge(status) {
+    const el = document.getElementById('execStatusBadge');
+    el.textContent = status;
+    el.className = `status-badge status-${status}`;
+    const cf = document.getElementById('cancelForm');
+    if (cf) cf.style.display = ['queued','running','cancelling','scheduled'].includes(status) ? 'inline' : 'none';
+    if (['completed','failed','cancelled'].includes(status)) {
+        document.getElementById('livePanel').style.display = 'none';
+        stopSSE();
+    }
+}
+
+// ── Tool status ───────────────────────────────────────────────
+function setToolStatus(tid, status) {
+    const el = document.getElementById(`toolStatus_${tid}`);
+    if (!el) return;
+    el.textContent = status;
+    el.className = `status-badge status-${status}`;
+    const btn = document.getElementById(`btn_${tid}`);
+    if (btn) btn.disabled = !['completed','failed'].includes(status);
+}
+
+// ── Output loading ────────────────────────────────────────────
+async function loadOutput(tid) {
+    const resp = await fetch(`/api/execution/${executionId}/results/${tid}`);
+    if (!resp.ok) return;
+    const d = await resp.json();
+    toolCache[tid] = { sha_out: d.output_sha256 || '', sha_err: d.error_sha256 || '' };
+    document.getElementById(`stdout_${tid}`).textContent = d.output || '';
+    document.getElementById(`stderr_${tid}`).textContent = d.error  || '';
+    const meta = [];
+    if (d.start_time) meta.push('start=' + d.start_time.slice(11,19));
+    if (d.end_time)   meta.push('end='   + d.end_time.slice(11,19));
+    if (d.exit_code != null) meta.push('exit=' + d.exit_code);
+    meta.push(`out=${d.output_len}b`, `err=${d.error_len}b`);
+    document.getElementById(`meta_${tid}`).textContent = meta.join(' | ');
+}
+
+function toggleOutput(tid) {
+    const wrap = document.getElementById(`outputWrap_${tid}`);
+    const show = wrap.style.display === 'none';
+    wrap.style.display = show ? 'block' : 'none';
+    if (show && !toolCache[tid]) loadOutput(tid);
+}
+
+// ── Events ────────────────────────────────────────────────────
+function renderEvents(events) {
+    const box = document.getElementById('eventsBox');
+    if (!events || !events.length) { box.textContent = 'No events yet.'; return; }
+    box.textContent = events.map(e => {
+        const t = e.tool_id ? ` [${e.tool_id.slice(-6)}]` : '';
+        return `${e.ts.slice(11,19)} [${e.level}]${t} ${e.message}`;
+    }).join('\n');
+    box.scrollTop = box.scrollHeight;
+}
+
+async function refreshEvents() {
+    const r = await fetch(`/api/execution/${executionId}/events`);
+    if (!r.ok) return;
+    const d = await r.json();
+    renderEvents(d.events || []);
+}
+
+// ── SSE live stream ───────────────────────────────────────────
+const liveOutput = document.getElementById('liveOutput');
+const liveLines = [];
+const MAX_LINES = 500;
+
+function startSSE() {
+    if (sseSource) return;
+    sseSource = new EventSource(`/api/execution/${executionId}/stream`);
+    sseSource.onmessage = (e) => {
+        const item = JSON.parse(e.data);
+        if (item.type === 'done') { stopSSE(); return; }
+        if (!item.line) return;
+        const prefix = item.kind === 'stderr' ? '[ERR] ' : '';
+        liveLines.push(prefix + item.line);
+        if (liveLines.length > MAX_LINES) liveLines.shift();
+        liveOutput.textContent = liveLines.join('\n');
+        liveOutput.scrollTop = liveOutput.scrollHeight;
+    };
+    sseSource.onerror = () => stopSSE();
+}
+
+function stopSSE() {
+    if (sseSource) { sseSource.close(); sseSource = null; }
+}
+
+function clearLive() { liveLines.length = 0; liveOutput.textContent = ''; }
+
+// ── Status polling ────────────────────────────────────────────
+async function pollStatus() {
+    try {
+        const r = await fetch(`/api/execution/${executionId}/status`);
+        if (!r.ok) { scheduleNext(true); return; }
+        const d = await r.json();
+        const version = d.version || 0;
+
+        document.getElementById('execStarted').textContent   = d.started_at   ? d.started_at.slice(0,16).replace('T',' ')   : '—';
+        document.getElementById('execCompleted').textContent = d.completed_at ? d.completed_at.slice(0,16).replace('T',' ') : '—';
+        const modeEl = document.getElementById('execMode');
+        if (modeEl) modeEl.textContent = d.run_mode || 'once';
+        const iterEl = document.getElementById('execIter');
+        if (iterEl) iterEl.textContent = d.current_iteration || 0;
+
+        setStatusBadge(d.status || 'unknown');
+
+        // Update tool statuses and refresh open outputs if hash changed
+        for (const [tid, s] of Object.entries(d.results_summary || {})) {
+            setToolStatus(tid, s.status);
+            const wrap = document.getElementById(`outputWrap_${tid}`);
+            if (wrap && wrap.style.display !== 'none') {
+                const c = toolCache[tid] || {};
+                if (c.sha_out !== (s.output_sha256||'') || c.sha_err !== (s.error_sha256||'')) {
+                    loadOutput(tid);
+                }
+            }
+        }
+
+        if (d.events_tail) renderEvents(d.events_tail);
+
+        const changed = version !== lastVersion;
+        lastVersion = version;
+        const terminal = ['completed','failed','cancelled'].includes(d.status);
+        if (changed) pollDelay = 1500;
+        else if (!terminal) pollDelay = Math.min(pollDelay * 1.5, 8000);
+        scheduleNext(terminal);
+    } catch (e) {
+        scheduleNext(true);
+    }
+}
+
+function scheduleNext(stop) {
+    if (pollTimer) clearTimeout(pollTimer);
+    if (stop) { refreshEvents(); return; }
+    pollTimer = setTimeout(pollStatus, pollDelay);
+}
+
+// ── Init ─────────────────────────────────────────────────────
+setStatusBadge("{{ execution.status }}");
+renderEvents({{ (execution.events or [])[-20:] | tojson }});
+
+const initStatus = "{{ execution.status }}";
+if (['queued','running','cancelling'].includes(initStatus)) {
+    document.getElementById('livePanel').style.display = 'block';
+    startSSE();
+}
+pollStatus();
+</script>
+{% endblock %}

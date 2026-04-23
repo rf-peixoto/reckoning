@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Street - Reckoning</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary:      #010101;
+            --secondary:    #050505;
+            --tertiary:     #080808;
+            --accent:       #00ff41;
+            --accent-hover: #00cc33;
+            --accent-dim:   #007a22;
+            --text:         #00e038;
+            --text-muted:   #2f6633;
+            --success:      #00ff41;
+            --warning:      #ffc400;
+            --danger:       #ff2222;
+            --info:         #00d4ff;
+            --border:       #010101;
+            --border-light: #0a1f0a;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Share Tech Mono', 'Courier New', Courier, monospace;
+            background-color: var(--primary);
+            color: var(--text);
+            line-height: 1.6;
+            /* CRT scanlines */
+            background-image: repeating-linear-gradient(
+                0deg, transparent, transparent 3px,
+                rgba(0,0,0,0.18) 3px, rgba(0,0,0,0.18) 4px
+            );
+            /* Phosphor glow on all text */
+            text-shadow: 0 0 6px rgba(0, 224, 56, 0.25);
+        }
+
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: #000; }
+        ::-webkit-scrollbar-thumb { background: var(--accent-dim); }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
+
+        /* ── Header ── */
+        .header { background: #000; border-bottom: 1px solid var(--accent-dim); padding: 10px 0; }
+        .header-content { display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+
+        /* Original logo colors — no filter applied */
+        .logo-img { height: 34px; width: auto; max-height: 34px; filter: none; }
+        @media (max-width: 768px) { .logo-img { height: 26px; } }
+
+        .nav-menu { display: flex; gap: 2px; flex-wrap: wrap; }
+        .nav-link {
+            color: var(--text-muted); text-decoration: none; font-size: 12px;
+            padding: 5px 12px; border: 1px solid transparent;
+            letter-spacing: 0.06em; transition: color 0.12s, border-color 0.12s, background 0.12s;
+            text-transform: uppercase;
+        }
+        .nav-link i { margin-right: 5px; }
+        .nav-link:hover { color: var(--accent); border-color: var(--accent-dim); background: rgba(0,255,65,0.03); }
+        .nav-link.active {
+            color: var(--accent); border: 1px solid var(--accent-dim);
+            background: rgba(0,255,65,0.05);
+            text-shadow: 0 0 10px rgba(0,255,65,0.5);
+        }
+
+        /* ── Cards ── */
+        .card { background: var(--secondary); border: 1px solid var(--border-light); margin-bottom: 20px; }
+        .card-header { padding: 9px 16px; border-bottom: 1px solid var(--border-light); background: #000; }
+        .card-header::before { content: '> '; color: var(--accent-dim); }
+        .card-title { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: 13px; font-weight: normal; text-transform: uppercase; letter-spacing: 0.1em; }
+        .card-body { padding: 16px; }
+
+        /* ── Buttons ── */
+        .btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 14px; border: 1px solid var(--border-light);
+            background: transparent; color: var(--text-muted); font-family: inherit;
+            font-size: 12px; cursor: pointer; text-decoration: none;
+            transition: color 0.12s, border-color 0.12s, background 0.12s, text-shadow 0.12s;
+            letter-spacing: 0.05em; text-transform: uppercase;
+        }
+        .btn::before { content: '['; color: var(--accent-dim); margin-right: 2px; }
+        .btn::after  { content: ']'; color: var(--accent-dim); margin-left:  2px; }
+        .btn-primary   { color: var(--accent);      border-color: var(--accent-dim); }
+        .btn-primary:hover   { background: rgba(0,255,65,0.07); border-color: var(--accent); text-shadow: 0 0 10px rgba(0,255,65,0.6); }
+        .btn-success   { color: var(--success);     border-color: var(--accent-dim); }
+        .btn-success:hover   { background: rgba(0,255,65,0.07); border-color: var(--success); }
+        .btn-warning   { color: var(--warning);     border-color: #4a3800; }
+        .btn-warning:hover   { background: rgba(255,196,0,0.06); border-color: var(--warning); }
+        .btn-danger    { color: var(--danger);      border-color: #4a0000; }
+        .btn-danger:hover    { background: rgba(255,34,34,0.06); border-color: var(--danger); }
+        .btn-secondary { color: var(--text-muted);  border-color: var(--border-light); }
+        .btn-secondary:hover { color: var(--text); border-color: var(--text-muted); }
+        .btn-sm { padding: 3px 9px; font-size: 11px; }
+        .btn:disabled, .btn[disabled] { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+
+        /* ── Forms ── */
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; margin-bottom: 5px; color: var(--accent-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; }
+        .form-control {
+            width: 100%; padding: 7px 10px; background: #000;
+            border: 1px solid var(--border-light); color: var(--text);
+            font-family: inherit; font-size: 12px;
+        }
+        .form-control:focus { outline: none; border-color: var(--accent-dim); box-shadow: 0 0 0 1px var(--accent-dim), 0 0 6px rgba(0,120,34,0.3); }
+        .form-text { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+        select.form-control option { background: #050505; }
+
+        /* ── Alerts ── */
+        .alert { padding: 10px 14px; margin-bottom: 16px; border-left: 3px solid; font-size: 12px; }
+        .alert::before { content: '// '; color: inherit; opacity: 0.5; }
+        .alert-info    { background: rgba(0,212,255,0.04);  border-color: var(--info);    color: var(--info);    }
+        .alert-success { background: rgba(0,255,65,0.04);   border-color: var(--success); color: var(--success); }
+        .alert-warning { background: rgba(255,196,0,0.04);  border-color: var(--warning); color: var(--warning); }
+        .alert-danger  { background: rgba(255,34,34,0.04);  border-color: var(--danger);  color: var(--danger);  }
+
+        /* ── Status badges ── */
+        .status-badge { display: inline-flex; align-items: center; padding: 1px 9px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; border: 1px solid; }
+        .status-pending    { border-color: var(--border-light); color: var(--text-muted); }
+        .status-queued     { border-color: var(--info);         color: var(--info);    animation: pulse 2s ease-in-out infinite; }
+        .status-scheduled  { border-color: var(--warning);      color: var(--warning); }
+        .status-running    { border-color: var(--info);         color: var(--info);    animation: pulse 1.4s ease-in-out infinite; }
+        .status-cancelling { border-color: var(--warning);      color: var(--warning); animation: pulse 1.4s ease-in-out infinite; }
+        .status-completed  { border-color: var(--success);      color: var(--success); }
+        .status-failed     { border-color: var(--danger);       color: var(--danger); }
+        .status-cancelled  { border-color: var(--text-muted);   color: var(--text-muted); }
+
+        /* ── Tool chain ── */
+        .tool-chain { display: flex; flex-direction: column; gap: 20px; position: relative; }
+        .tool-chain::before { content: ''; position: absolute; left: 30px; top: 0; bottom: 0; width: 1px; background: var(--border-light); z-index: 1; }
+        .tool-node { display: flex; align-items: center; gap: 20px; position: relative; z-index: 2; }
+        .tool-content { flex: 1; }
+        .tool-connector { position: absolute; left: 30px; top: 60px; width: 1px; height: 20px; background: var(--border-light); }
+
+        /* ── Progress ── */
+        .progress-bar { height: 6px; background: #000; border: 1px solid var(--border-light); overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--accent-dim); transition: width 0.5s ease; }
+
+        /* ── Code blocks ── */
+        .code-block {
+            background: #000; border: 1px solid var(--border-light);
+            border-left: 2px solid var(--accent-dim); padding: 12px;
+            font-family: inherit; font-size: 12px; overflow-x: auto; margin: 8px 0;
+            color: var(--text);
+        }
+        .code-block pre { margin: 0; white-space: pre-wrap; }
+
+        /* ── Tables ── */
+        .table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .table th {
+            background: #000; padding: 8px 12px; text-align: left; font-weight: normal;
+            color: var(--accent-dim); text-transform: uppercase; font-size: 10px;
+            letter-spacing: 0.12em; border-bottom: 1px solid var(--border-light);
+        }
+        .table td { padding: 9px 12px; border-bottom: 1px solid var(--border-light); }
+        .table tr:hover td { background: rgba(0,255,65,0.025); }
+
+        /* ── Utilities ── */
+        .d-flex        { display: flex; }
+        .flex-wrap     { flex-wrap: wrap; }
+        .justify-between { justify-content: space-between; }
+        .justify-end   { justify-content: flex-end; }
+        .align-center  { align-items: center; }
+        .gap-10        { gap: 10px; }
+        .gap-20        { gap: 20px; }
+        .mt-10         { margin-top: 10px; }
+        .mt-20         { margin-top: 20px; }
+        .mb-10         { margin-bottom: 10px; }
+        .mb-20         { margin-bottom: 20px; }
+        .text-center   { text-align: center; }
+        .text-muted    { color: var(--text-muted); }
+        .table-responsive { overflow-x: auto; }
+
+        /* ── Diff colors ── */
+        .diff-added   { color: var(--success); background: rgba(0,255,65,0.04); display: block; }
+        .diff-removed { color: var(--danger);  background: rgba(255,34,34,0.04); display: block; }
+        .diff-header  { color: var(--info); display: block; }
+
+        /* ── Animations ── */
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+        .pulse { animation: pulse 2s ease-in-out infinite; }
+
+        /* Blinking cursor only on page-level headings */
+        main > .page-title::after {
+            content: '▌'; color: var(--accent);
+            animation: blink 1s step-end infinite;
+            font-size: 0.8em; margin-left: 4px;
+            text-shadow: 0 0 8px var(--accent);
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            .header-content { flex-direction: column; gap: 12px; }
+            .nav-menu { justify-content: center; }
+            .tool-node { flex-direction: column; text-align: center; }
+            .tool-chain::before { display: none; }
+        }
+
+        /* ── Modal ── */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); z-index: 1000; }
+        .modal-content { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); background: var(--secondary); border: 1px solid var(--accent-dim); padding: 24px; width: 90%; max-width: 640px; max-height: 85%; overflow-y: auto; }
+
+        /* ── Footer ── */
+        footer { font-size: 11px; color: var(--text-muted); letter-spacing: 0.06em; }
+        footer p::before { content: '# '; color: var(--accent-dim); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container header-content">
+            <div class="logo">
+                <img src="/img/logo.png" alt="RTWF - Red Team Workflow" class="logo-img">
+            </div>
+            <nav class="nav-menu">
+                <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">
+                    <i class="fas fa-home"></i> Dashboard
+                </a>
+                <a href="{{ url_for('create_workflow') }}" class="nav-link {% if request.endpoint in ['create_workflow','edit_workflow'] %}active{% endif %}">
+                    <i class="fas fa-plus-circle"></i> Workflow
+                </a>
+                <a href="{{ url_for('executions_list') }}" class="nav-link {% if request.endpoint == 'executions_list' %}active{% endif %}">
+                    <i class="fas fa-history"></i> Executions
+                </a>
+                <a href="{{ url_for('tools_update') }}" class="nav-link {% if request.endpoint == 'tools_update' %}active{% endif %}">
+                    <i class="fas fa-sync-alt"></i> Updates
+                </a>
+                <a href="{{ url_for('settings') }}" class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}">
+                    <i class="fas fa-cog"></i> Settings
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container" style="padding: 30px 0;">
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+{% block content %}{% endblock %}
+    </main>
+
+    <footer style="background: var(--secondary); padding: 16px 0; margin-top: 40px; border-top: 1px solid var(--border-light);">
+        <div class="container text-center text-muted">
+            <p>The Street | Reckoning</p>
+            <p style="margin-top: 4px;">the-street.xyz</p>
+        </div>
+    </footer>
+
+    <script>
+        window.showAlert = function(message, type) {
+            const d = document.createElement('div');
+            d.className = `alert alert-${type}`;
+            d.textContent = message;
+            const c = document.querySelector('main.container');
+            c.insertBefore(d, c.firstChild);
+            setTimeout(() => d.remove(), 6000);
+        };
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

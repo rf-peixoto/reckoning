@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 class="page-title" style="color: var(--accent);">Workflow Dashboard</h2>
+    <a href="{{ url_for('create_workflow') }}" class="btn btn-primary">
+        <i class="fas fa-plus"></i> New Workflow
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-project-diagram"></i> Workflows</div>
+    </div>
+    <div class="card-body">
+        {% if workflows %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th>Mode</th>
+                        <th>Tools</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for wf in workflows %}
+                    <tr>
+                        <td><strong>{{ wf.name }}</strong></td>
+                        <td style="color: var(--text-muted); max-width: 280px;">{{ wf.description }}</td>
+                        <td>
+                            <span class="status-badge status-pending">{{ wf.run_mode or 'once' }}</span>
+                        </td>
+                        <td>{{ wf.tools|length }}</td>
+                        <td style="color: var(--text-muted);">{{ wf.updated_at[:10] }}</td>
+                        <td>
+                            <div class="d-flex gap-10">
+                                <a href="{{ url_for('edit_workflow', workflow_id=wf.id) }}" class="btn btn-secondary btn-sm">
+                                    <i class="fas fa-edit"></i> Edit
+                                </a>
+                                <button onclick="openRunModal('{{ wf.id }}', '{{ wf.name }}', '{{ wf.run_mode }}')" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-play"></i> Run
+                                </button>
+                                <a href="{{ url_for('export_workflow', workflow_id=wf.id) }}" class="btn btn-success btn-sm">
+                                    <i class="fas fa-download"></i>
+                                </a>
+                                <form action="{{ url_for('delete_workflow_route', workflow_id=wf.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Delete this workflow?')">
+                                    <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center" style="padding: 40px;">
+            <i class="fas fa-terminal" style="font-size: 48px; color: var(--text-muted); margin-bottom: 20px;"></i>
+            <p style="color: var(--text-muted);">No workflows yet. Create your first one.</p>
+            <a href="{{ url_for('create_workflow') }}" class="btn btn-primary mt-20">
+                <i class="fas fa-plus"></i> Create Workflow
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Run Modal -->
+<div id="runModal" class="modal">
+    <div class="modal-content">
+        <div class="d-flex justify-between align-center mb-20">
+            <span id="runModalTitle" style="color: var(--accent); font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em;"></span>
+            <button onclick="closeRunModal()" style="background:none; border:none; color:var(--text-muted); font-size:18px; cursor:pointer;">✕</button>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Target(s)</label>
+            <textarea id="targetDomain" class="form-control" rows="3"
+                placeholder="example.com&#10;target2.com&#10;(one per line — runs as separate executions)"></textarea>
+            <div class="form-text">One target per line. Multiple targets create parallel executions.</div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Run Start</label>
+            <select id="runStartMode" class="form-control" onchange="toggleScheduledAt()">
+                <option value="now">Start immediately</option>
+                <option value="scheduled">Schedule for later</option>
+            </select>
+        </div>
+
+        <div class="form-group" id="scheduledAtGroup" style="display:none;">
+            <label class="form-label">Scheduled Date &amp; Time</label>
+            <input type="datetime-local" id="scheduledAt" class="form-control">
+            <div class="form-text">The execution will wait until this time before starting.</div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Notes (optional)</label>
+            <textarea id="executionNotes" class="form-control" rows="2" placeholder="Free-form notes for this run…"></textarea>
+        </div>
+
+        <div class="alert alert-warning" style="margin-bottom: 16px;">
+            Only run against authorized targets.
+        </div>
+
+        <div class="d-flex justify-end gap-10">
+            <button onclick="closeRunModal()" class="btn btn-secondary">Cancel</button>
+            <button onclick="startExecution()" class="btn btn-primary">
+                <i class="fas fa-play"></i> Start
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-lightbulb"></i> Quick Reference</div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20 flex-wrap">
+            <div style="flex:1; min-width: 240px;">
+                <div style="color: var(--accent-dim); font-size: 12px; margin-bottom: 8px;">PLACEHOLDER SYNTAX</div>
+                <div class="code-block" style="font-size: 12px;">
+{domain}     → initial target<br>
+{0}          → initial target (alias)<br>
+{1}          → step 1 output<br>
+{2}          → step 2 output<br>
+{out_TOOLID} → stable tool ref<br>
+{entry_name} → string library entry
+                </div>
+            </div>
+            <div style="flex:1; min-width: 240px;">
+                <div style="color: var(--accent-dim); font-size: 12px; margin-bottom: 8px;">RUN MODES</div>
+                <div class="code-block" style="font-size: 12px;">
+once       → single run<br>
+repeat     → N times, sleep between<br>
+interval   → every N minutes forever<br>
+scheduled  → fire at a specific datetime
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _wfId = null;
+
+function openRunModal(wfId, wfName, runMode) {
+    _wfId = wfId;
+    document.getElementById('runModalTitle').textContent = `Run: ${wfName}`;
+    document.getElementById('targetDomain').value = '';
+    document.getElementById('executionNotes').value = '';
+    document.getElementById('runStartMode').value = 'now';
+    document.getElementById('scheduledAtGroup').style.display = 'none';
+    // Default datetime to 1 hour from now
+    const d = new Date(Date.now() + 3600000);
+    document.getElementById('scheduledAt').value = d.toISOString().slice(0,16);
+    document.getElementById('runModal').style.display = 'block';
+}
+
+function closeRunModal() {
+    document.getElementById('runModal').style.display = 'none';
+    _wfId = null;
+}
+
+function toggleScheduledAt() {
+    const mode = document.getElementById('runStartMode').value;
+    document.getElementById('scheduledAtGroup').style.display = mode === 'scheduled' ? '' : 'none';
+}
+
+async function startExecution() {
+    const domain = document.getElementById('targetDomain').value.trim();
+    if (!domain) { alert('Enter at least one target.'); return; }
+
+    const runStartMode = document.getElementById('runStartMode').value;
+    let scheduledAt = null;
+    if (runStartMode === 'scheduled') {
+        scheduledAt = document.getElementById('scheduledAt').value;
+        if (!scheduledAt) { alert('Pick a date/time for the scheduled run.'); return; }
+        // Convert local datetime-local to ISO string
+        scheduledAt = new Date(scheduledAt).toISOString();
+    }
+
+    const notes = document.getElementById('executionNotes').value.trim();
+
+    try {
+        const resp = await fetch('/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workflow_id: _wfId, domain, notes, scheduled_at: scheduledAt })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            window.location.href = data.redirect;
+        } else {
+            alert('Error: ' + data.error);
+            closeRunModal();
+        }
+    } catch (e) {
+        alert('Error: ' + e);
+        closeRunModal();
+    }
+}
+
+document.getElementById('runModal').addEventListener('click', e => {
+    if (e.target.id === 'runModal') closeRunModal();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeRunModal(); });
+</script>
+{% endblock %}

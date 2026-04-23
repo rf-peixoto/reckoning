@@ -1,0 +1,426 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-20">
+    <h2 class="page-title" style="color: var(--accent);">
+        {% if workflow %}Edit Workflow{% else %}New Workflow{% endif %}
+    </h2>
+    <div class="d-flex gap-10">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back</a>
+        <button onclick="saveWorkflow()" class="btn btn-primary"><i class="fas fa-save"></i> Save</button>
+    </div>
+</div>
+
+<div class="card mb-20">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-info-circle"></i> Workflow Configuration</div>
+    </div>
+    <div class="card-body">
+        <div class="form-group">
+            <label class="form-label">Workflow Name</label>
+            <input type="text" id="workflowName" class="form-control"
+                   value="{{ workflow.name if workflow else 'New Workflow' }}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea id="workflowDescription" class="form-control" rows="2">{{ workflow.description if workflow else '' }}</textarea>
+        </div>
+
+        <hr style="border-color: var(--border-light); margin: 16px 0;">
+
+        <div class="d-flex gap-20 flex-wrap">
+            <div class="form-group" style="min-width: 240px; flex: 1;">
+                <label class="form-label">Execution Mode</label>
+                <select id="workflowRunMode" class="form-control" onchange="toggleRecurrenceFields()">
+                    <option value="once"      {% if workflow and workflow.run_mode == 'once'      %}selected{% endif %}>Once (default)</option>
+                    <option value="repeat"    {% if workflow and workflow.run_mode == 'repeat'    %}selected{% endif %}>Repeat N times</option>
+                    <option value="interval"  {% if workflow and workflow.run_mode == 'interval'  %}selected{% endif %}>Recurring interval</option>
+                    <option value="scheduled" {% if workflow and workflow.run_mode == 'scheduled' %}selected{% endif %}>Run once at date/time</option>
+                </select>
+            </div>
+
+            <div id="fieldsInterval" class="form-group" style="min-width: 220px; flex: 1; display:none;">
+                <label class="form-label">Interval (minutes)</label>
+                <input type="number" id="workflowIntervalMinutes" class="form-control" min="1" step="1"
+                       value="{{ workflow.interval_minutes if workflow and workflow.interval_minutes is not none else 10 }}">
+                <div class="form-text">Runs indefinitely every N minutes until cancelled.</div>
+            </div>
+
+            <div id="fieldsRepeat" class="form-group" style="min-width: 220px; flex: 1; display:none;">
+                <label class="form-label">Repeat Count / Sleep</label>
+                <div class="d-flex gap-10">
+                    <div style="flex:1;">
+                        <input type="number" id="workflowRepeatCount" class="form-control" min="1"
+                               value="{{ workflow.repeat_count if workflow and workflow.repeat_count is not none else 5 }}"
+                               placeholder="Times">
+                        <div class="form-text">Runs</div>
+                    </div>
+                    <div style="flex:1;">
+                        <input type="number" id="workflowRepeatInterval" class="form-control" min="0"
+                               value="{{ workflow.repeat_interval_minutes if workflow and workflow.repeat_interval_minutes is not none else 10 }}"
+                               placeholder="Minutes">
+                        <div class="form-text">Sleep between</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="fieldsScheduled" class="form-group" style="min-width: 240px; flex: 1; display:none;">
+                <label class="form-label">Scheduled Date &amp; Time</label>
+                <input type="datetime-local" id="workflowScheduledAt" class="form-control"
+                       value="{{ workflow.scheduled_at[:16] if workflow and workflow.scheduled_at else '' }}">
+                <div class="form-text">Workflow will fire once when this time arrives.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-between align-center">
+        <div class="card-title"><i class="fas fa-tools"></i> Tool Chain</div>
+        <button onclick="addTool()" class="btn btn-success btn-sm"><i class="fas fa-plus"></i> Add Tool</button>
+    </div>
+    <div class="card-body">
+        <div id="toolChain" class="tool-chain">
+            {% if workflow and workflow.tools %}
+                {% for tool in workflow.tools %}
+                <div class="tool-node" data-tool-id="{{ tool.id }}" style="border-left: 4px solid {{ tool.color }};">
+                    <div class="tool-content">
+                        <div class="card" style="margin-bottom: 0;">
+                            <div class="card-header d-flex justify-between align-center">
+                                <input type="text" class="form-control"
+                                       style="width:auto; background:transparent; border:none; color:var(--accent); font-weight:bold; font-size:15px;"
+                                       value="{{ tool.name }}">
+                                <div class="d-flex gap-10 align-center">
+                                    <select class="form-control" style="width:auto; padding:4px 8px;" onchange="updateToolColor(this,'{{ tool.id }}')">
+                                        <option value="#00ff41" {% if tool.color == '#00ff41' %}selected{% endif %}>Green</option>
+                                        <option value="#00ccff" {% if tool.color == '#00ccff' %}selected{% endif %}>Cyan</option>
+                                        <option value="#ffcc00" {% if tool.color == '#ffcc00' %}selected{% endif %}>Yellow</option>
+                                        <option value="#ff3333" {% if tool.color == '#ff3333' %}selected{% endif %}>Red</option>
+                                        <option value="#ff8800" {% if tool.color == '#ff8800' %}selected{% endif %}>Orange</option>
+                                        <option value="#aa88ff" {% if tool.color == '#aa88ff' %}selected{% endif %}>Purple</option>
+                                    </select>
+                                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:var(--text-muted);">
+                                        <input type="checkbox" {% if tool.enabled %}checked{% endif %}> Enabled
+                                    </label>
+                                    <button onclick="removeTool('{{ tool.id }}')" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex gap-20 flex-wrap">
+                                    <div style="flex:1; min-width:240px;">
+                                        <div class="form-group">
+                                            <label class="form-label">Tool Library</label>
+                                            <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
+                                                <option value="">Custom (manual)</option>
+                                                {% for t in tool_library %}
+                                                <option value="{{ t.id }}" {% if tool.library_tool_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Command / Path</label>
+                                            <input type="text" class="form-control tool-command" value="{{ tool.command }}" placeholder="/usr/bin/nuclei">
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Arguments Template</label>
+                                            <input type="text" class="form-control tool-args" value="{{ tool.args_template }}" placeholder="{domain}, -l {subdomains}">
+                                            <div class="form-text">{0}/{domain}=target, {1..N}=prev tool outputs</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Update Command</label>
+                                            <input type="text" class="form-control tool-update-command" value="{{ tool.update_command or '' }}" placeholder="-update">
+                                        </div>
+                                    </div>
+                                    <div style="flex:1; min-width:240px;">
+                                        <input type="hidden" class="tool-input-source" value="specific">
+                                        <div class="form-group tool-specific-step">
+                                            <label class="form-label">Input from Step #</label>
+                                            <input type="number" class="form-control" min="1" max="50"
+                                                   value="{% if tool.input_source == 'specific' and tool.specific_step %}{{ tool.specific_step }}{% else %}{{ loop.index - 1 if loop.index > 1 else 1 }}{% endif %}">
+                                            <div class="form-text">Step number whose output feeds this tool.</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Step Timeout (seconds, optional)</label>
+                                            <input type="number" class="form-control tool-timeout" min="1"
+                                                   value="{{ tool.timeout_override or '' }}" placeholder="Global default">
+                                            <div class="form-text">Override the global max_execution_time for this step only.</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Description</label>
+                                            <textarea class="form-control tool-description" rows="2">{{ tool.description }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Last Updated</label>
+                                            <input type="text" class="form-control" readonly style="opacity:0.5;"
+                                                   value="{{ tool.last_updated or 'Never' }}">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% if not loop.last %}<div class="tool-connector"></div>{% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+            <div id="no-tools" class="text-center" style="padding: 40px;">
+                <i class="fas fa-terminal" style="font-size: 48px; color: var(--text-muted); margin-bottom: 16px;"></i>
+                <p style="color: var(--text-muted);">No tools yet.</p>
+                <button onclick="addTool()" class="btn btn-primary mt-20"><i class="fas fa-plus"></i> Add First Tool</button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card mt-20">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-share-alt"></i> Import / Export</div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-20 flex-wrap">
+            <div style="flex:1; min-width:220px;">
+                <div style="color:var(--accent-dim); font-size:12px; margin-bottom:8px;">EXPORT</div>
+                <p style="color:var(--text-muted); font-size:12px; margin-bottom:12px;">Download this workflow as a JSON file.</p>
+                <button onclick="exportWorkflow()" class="btn btn-success"><i class="fas fa-download"></i> Export JSON</button>
+            </div>
+            <div style="flex:1; min-width:220px;">
+                <div style="color:var(--accent-dim); font-size:12px; margin-bottom:8px;">IMPORT</div>
+                <p style="color:var(--text-muted); font-size:12px; margin-bottom:12px;">Load a workflow from a JSON file.</p>
+                <form action="{{ url_for('import_workflow') }}" method="POST" enctype="multipart/form-data">
+                    <div class="d-flex gap-10">
+                        <input type="file" name="file" accept=".json" class="form-control" style="flex:1;">
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-upload"></i> Import</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TOOL_LIBRARY = {{ (tool_library or []) | tojson }};
+let toolCounter = {{ workflow.tools|length if workflow else 0 }};
+const COLORS = ['#00ff41','#00ccff','#ffcc00','#ff8800','#aa88ff','#ff3333'];
+
+function buildLibraryOptions(selectedId) {
+    let html = '<option value="">Custom (manual)</option>';
+    for (const t of TOOL_LIBRARY) {
+        const sel = t.id === selectedId ? ' selected' : '';
+        html += `<option value="${t.id}"${sel}>${(t.name||'').replace(/</g,'&lt;')}</option>`;
+    }
+    return html;
+}
+
+function toggleRecurrenceFields() {
+    const mode = document.getElementById('workflowRunMode').value;
+    document.getElementById('fieldsInterval').style.display  = mode === 'interval'  ? '' : 'none';
+    document.getElementById('fieldsRepeat').style.display    = mode === 'repeat'    ? '' : 'none';
+    document.getElementById('fieldsScheduled').style.display = mode === 'scheduled' ? '' : 'none';
+}
+
+function addTool() {
+    toolCounter++;
+    const toolId = 'tool_' + Date.now();
+    const color  = COLORS[toolCounter % COLORS.length];
+    const html = `
+    <div class="tool-node" data-tool-id="${toolId}" style="border-left:4px solid ${color};">
+        <div class="tool-content">
+            <div class="card" style="margin-bottom:0;">
+                <div class="card-header d-flex justify-between align-center">
+                    <input type="text" class="form-control"
+                           style="width:auto;background:transparent;border:none;color:var(--accent);font-weight:bold;font-size:15px;"
+                           value="Tool ${toolCounter}">
+                    <div class="d-flex gap-10 align-center">
+                        <select class="form-control" style="width:auto;padding:4px 8px;" onchange="updateToolColor(this,'${toolId}')">
+                            <option value="#00ff41">Green</option>
+                            <option value="#00ccff">Cyan</option>
+                            <option value="#ffcc00">Yellow</option>
+                            <option value="#ff3333">Red</option>
+                            <option value="#ff8800">Orange</option>
+                            <option value="#aa88ff">Purple</option>
+                        </select>
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--text-muted);">
+                            <input type="checkbox" checked> Enabled
+                        </label>
+                        <button onclick="removeTool('${toolId}')" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex gap-20 flex-wrap">
+                        <div style="flex:1;min-width:240px;">
+                            <div class="form-group">
+                                <label class="form-label">Tool Library</label>
+                                <select class="form-control tool-library-select" onchange="applyToolLibrary(this)">
+                                    ${buildLibraryOptions('')}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Command / Path</label>
+                                <input type="text" class="form-control tool-command" placeholder="/usr/bin/nuclei">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Arguments Template</label>
+                                <input type="text" class="form-control tool-args" placeholder="{domain}, -l {subdomains}">
+                                <div class="form-text">{0}/{domain}=target, {1..N}=prev tool outputs</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Update Command</label>
+                                <input type="text" class="form-control tool-update-command" placeholder="-update">
+                            </div>
+                        </div>
+                        <div style="flex:1;min-width:240px;">
+                            <input type="hidden" class="tool-input-source" value="specific">
+                            <div class="form-group tool-specific-step">
+                                <label class="form-label">Input from Step #</label>
+                                <input type="number" class="form-control" value="${Math.max(1,toolCounter-1)}" min="1" max="50">
+                                <div class="form-text">Step number whose output feeds this tool.</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Step Timeout (seconds, optional)</label>
+                                <input type="number" class="form-control tool-timeout" min="1" placeholder="Global default">
+                                <div class="form-text">Override global timeout for this step only.</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Description</label>
+                                <textarea class="form-control tool-description" rows="2" placeholder="What does this tool do?"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="tool-connector"></div>
+    </div>`;
+    const noTools = document.getElementById('no-tools');
+    if (noTools) noTools.remove();
+    document.getElementById('toolChain').insertAdjacentHTML('beforeend', html);
+    // Set correct color in dropdown
+    const node = document.querySelector(`[data-tool-id="${toolId}"]`);
+    node.querySelector('select').value = color;
+}
+
+function removeTool(toolId) {
+    const el = document.querySelector(`[data-tool-id="${toolId}"]`);
+    if (el) el.remove();
+    const chain = document.getElementById('toolChain');
+    if (!chain.querySelector('.tool-node')) {
+        chain.innerHTML = `<div id="no-tools" class="text-center" style="padding:40px;">
+            <i class="fas fa-terminal" style="font-size:48px;color:var(--text-muted);margin-bottom:16px;"></i>
+            <p style="color:var(--text-muted);">No tools yet.</p>
+            <button onclick="addTool()" class="btn btn-primary mt-20"><i class="fas fa-plus"></i> Add First Tool</button>
+        </div>`;
+    }
+}
+
+function updateToolColor(select, toolId) {
+    const node = document.querySelector(`[data-tool-id="${toolId}"]`);
+    if (node) node.style.borderLeftColor = select.value;
+}
+
+function applyToolLibrary(selectEl) {
+    const id = selectEl.value;
+    if (!id) return;
+    const preset = TOOL_LIBRARY.find(t => t.id === id);
+    if (!preset) return;
+    const node = selectEl.closest('.tool-node');
+    const set = (cls, val) => { const el = node.querySelector(cls); if (el && val !== undefined) el.value = val || ''; };
+    set('.tool-command',        preset.path || preset.command || '');
+    set('.tool-args',           preset.default_command || preset.args_template || '');
+    set('.tool-update-command', preset.update_command || '');
+    set('.tool-description',    preset.description || '');
+}
+
+function _collectTools() {
+    const tools = [];
+    document.querySelectorAll('.tool-node').forEach((node) => {
+        const toolId     = node.dataset.toolId;
+        const name       = node.querySelector('input[type="text"]').value;
+        const libId      = (node.querySelector('.tool-library-select') || {}).value || null;
+        const command    = node.querySelector('.tool-command').value;
+        const args       = node.querySelector('.tool-args').value;
+        const updateCmd  = node.querySelector('.tool-update-command').value;
+        const step       = parseInt(node.querySelector('.tool-specific-step input').value) || null;
+        const desc       = node.querySelector('.tool-description').value;
+        const timeoutEl  = node.querySelector('.tool-timeout');
+        const timeout    = timeoutEl && timeoutEl.value ? parseInt(timeoutEl.value) : null;
+        const color      = node.style.borderLeftColor || '#00ff41';
+        const enabled    = node.querySelector('input[type="checkbox"]').checked;
+
+        let cmdOverride = null, argsOverride = null, updOverride = null, descOverride = null;
+        if (libId) {
+            const preset = TOOL_LIBRARY.find(t => t.id === libId);
+            if (preset) {
+                if (command !== (preset.path || preset.command || '')) cmdOverride  = command;
+                if (args    !== (preset.default_command || ''))         argsOverride = args;
+                if (updateCmd !== (preset.update_command || ''))        updOverride  = updateCmd;
+                if (desc    !== (preset.description || ''))             descOverride = desc;
+            }
+        }
+
+        tools.push({
+            id: toolId, name, library_tool_id: libId || null,
+            command, args_template: args,
+            command_override: cmdOverride, args_template_override: argsOverride,
+            update_command_override: updOverride, description_override: descOverride,
+            input_source: 'specific', specific_step: step,
+            description: desc, color, enabled,
+            update_command: updateCmd,
+            timeout_override: timeout,
+        });
+    });
+    return tools;
+}
+
+function _buildPayload() {
+    const mode = document.getElementById('workflowRunMode').value;
+    const toInt = id => { const v = parseInt((document.getElementById(id)||{}).value||''); return Number.isFinite(v) ? v : null; };
+    const scheduledRaw = (document.getElementById('workflowScheduledAt')||{}).value || '';
+    const payload = {
+        name:        document.getElementById('workflowName').value,
+        description: document.getElementById('workflowDescription').value,
+        tools:       _collectTools(),
+        run_mode:    mode,
+        interval_minutes:        mode === 'interval'  ? toInt('workflowIntervalMinutes') : null,
+        repeat_count:            mode === 'repeat'    ? toInt('workflowRepeatCount')     : null,
+        repeat_interval_minutes: mode === 'repeat'    ? toInt('workflowRepeatInterval')  : null,
+        scheduled_at:            mode === 'scheduled' && scheduledRaw ? new Date(scheduledRaw).toISOString() : null,
+    };
+    {% if workflow %}payload.id = '{{ workflow.id }}';{% endif %}
+    return payload;
+}
+
+async function saveWorkflow() {
+    try {
+        const resp = await fetch('{{ url_for("save_workflow_route") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_buildPayload())
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showAlert('Workflow saved.', 'success');
+            setTimeout(() => window.location.href = '{{ url_for("index") }}', 800);
+        } else {
+            showAlert('Save failed: ' + data.error, 'danger');
+        }
+    } catch (e) {
+        showAlert('Save failed: ' + e, 'danger');
+    }
+}
+
+function exportWorkflow() {
+    const data = _buildPayload();
+    data.created_at = new Date().toISOString();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (data.name || 'workflow').replace(/\s+/g,'_').toLowerCase() + '_workflow.json';
+    a.click();
+}
+
+document.addEventListener('DOMContentLoaded', toggleRecurrenceFields);
+</script>
+{% endblock %}
